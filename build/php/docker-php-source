@@ -1,0 +1,39 @@
+#!/bin/sh
+set -e
+
+dir=php
+
+usage() {
+	echo "usage: $0 COMMAND"
+	echo
+	echo "Manage php source tarball lifecycle."
+	echo
+	echo "Commands:"
+	echo "   extract  extract php source tarball into directory $dir if not already done."
+	echo "   delete   delete extracted php source located into $dir if not already done."
+	echo
+}
+
+case "$1" in
+	extract)
+		mkdir -p "${TMP_DIR}"
+		if [ ! -f "${TMP_DIR}/.docker-extracted" ]; then
+			mkdir -p ${TMP_DIR}/php
+			tar -Jxf ${TMP_DIR}/php-${PHP_VERSION}.${PHP_SUFFIX} -C "$dir" --strip-components=1
+			touch "${TMP_DIR}/.docker-extracted"
+		fi
+		;;
+
+	delete_dir)
+		rm -rf "${TMP_DIR}"
+		;;
+
+	switch_dir)
+		cd "${TMP_DIR}"
+		;;
+
+	*)
+		usage
+		exit 1
+		;;
+esac

@@ -1,0 +1,39 @@
+cluster.name: docker-cluster
+network.host: 0.0.0.0
+
+discovery.type: single-node
+
+# minimum_master_nodes need to be explicitly set when bound on a public IP
+# set to 1 to allow single node clusters
+# Details: https://github.com/elastic/elasticsearch/pull/17288
+# discovery.zen.minimum_master_nodes: 1
+
+# ----------------------------------- Memory -----------------------------------
+http.cors.enabled: true
+http.cors.allow-origin: "*"
+http.cors.allow-headers: Authorization
+
+# 生产必须为true，内存锁定检查，目的是内存地址直接映射，减少一次copy时间
+bootstrap.memory_lock: false
+
+## X-Pack settings
+## see https://www.elastic.co/guide/en/elasticsearch/reference/current/security-settings.html
+#
+# xpack.license.self_generated.type: trial
+xpack.security.enabled: true
+# xpack.security.transport.ssl.enabled: false
+# xpack.security.http.ssl.enabled: false
+# xpack.security.enrollment.enabled: true
+
+action.auto_create_index: .security,.monitoring*,.watches,.triggered_watches,.watcher-history*
+
+indices.fielddata.cache.size:  80%
+indices.breaker.fielddata.limit: 60%
+
+# Allow HTTP API connections from localhost and local networks
+# Connections are encrypted and require user authentication
+http.host: [_local_, _site_]
+
+# Allow other nodes to join the cluster from localhost and local networks
+# Connections are encrypted and mutually authenticated
+transport.host: [_local_, _site_]

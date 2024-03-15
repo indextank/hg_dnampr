@@ -1,0 +1,11 @@
+version: "3.9"
+
+services:
+  nginx:
+    volumes:
+      - mac-sync:/var/www/html:cached # will be mounted on /var/www
+
+# that the important thing
+volumes:
+  mac-sync:
+    external: true

@@ -1,0 +1,6 @@
+.git
+!.gitignore
+.conf
+bak
+certs
+*/.DS_Store

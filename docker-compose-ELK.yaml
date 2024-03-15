@@ -1,0 +1,110 @@
+version: "3.9"
+
+x-common:
+  &default-common
+  restart: always
+  env_file: ./.env
+  dns:
+    - ${DNS:-223.5.5.5}
+
+services:
+
+################   ELK  ########################
+  elasticsearch:
+    << : *default-common
+    build:
+      context: ./
+      dockerfile: ./build/elk/elasticsearch/Dockerfile
+      args:
+        ELK_VERSION: ${ELK_VERSION}
+        TINI_VERSION: ${TINI_VERSION}
+        ELASTICSEARCH_PLUGINS: ${ELASTICSEARCH_PLUGINS}
+        CHANGE_SOURCE: ${CHANGE_SOURCE}
+    container_name: elasticsearch
+    environment:
+      TZ: $TZ
+      NODE_NAME: elasticsearch
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-}
+    volumes:
+      - ${ELASTICSEARCH_DATA_PATH}/:/usr/share/elasticsearch/data
+      - ${ELASTICSEARCH_LOG_DIR}/:/usr/share/elasticsearch/logs:rw
+      - ${ELASTICSEARCH_CONF_DIR}:/usr/share/elasticsearch/config:rw
+    hostname: elasticsearch
+    restart: always
+    ports:
+      - "${ELASTICSEARCH_HOST_PORT}:9200"
+      # - "${ELASTICSEARCH_HOST_PORT_S}:9300"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    networks:
+      - default
+
+  kibana:
+    << : *default-common
+    container_name: kibana
+    build:
+      context: ./
+      dockerfile: ./build/elk/kibana/Dockerfile
+      args:
+        ELK_VERSION: ${ELK_VERSION}
+        TINI_VERSION: ${TINI_VERSION}
+        CHANGE_SOURCE: ${CHANGE_SOURCE}
+    environment:
+      TZ: "$TZ"
+      SERVER_PUBLICBASEURL: ${KIBANA_PUBLIC_BASE_URL}
+      ELASTICSEARCH_REQUESTTIMEOUT: 300000
+      I18N_LOCALE: "${KIBANA_I18N_LOCALE}"
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: "kibana_system"
+      ELASTICSEARCH_PASSWORD: ${KIBANA_SYSTEM_PASSWORD:-}
+    volumes:
+      - ${KIBANA_CONF_DIR}:/usr/share/kibana/config:rw
+    hostname: kibana
+    depends_on:
+      - elasticsearch
+    restart: always
+    ports:
+      - "${KIBANA_HOST}:5601"
+    networks:
+      - default
+
+  logstash:
+    << : *default-common
+    container_name: logstash
+    build:
+      context: ./
+      dockerfile: ./build/elk/logstash/Dockerfile
+      args:
+        ELK_VERSION: ${ELK_VERSION}
+        CHANGE_SOURCE: ${CHANGE_SOURCE}
+    hostname: logstash
+    restart: always
+    depends_on:
+      - elasticsearch
+    environment:
+      TZ: $TZ
+      NODE_NAME: logstash
+      PIPELINE_WORKERS: 8
+      PIPELINE_BATCH_SIZE: 500
+      PIPELINE_BATCH_DELAY: 5
+      XPACK_MONITORING_ENABLED: false
+      LS_JAVA_OPTS: ${LS_JAVA_OPTS}
+      LOGSTASH_INTERNAL_PASSWORD: ${LOGSTASH_INTERNAL_PASSWORD:-}
+    volumes:
+      - ${LOGSTASH_CONF_DIR}:/usr/share/logstash/config:rw
+      - ${LOGSTASH_PIPELINE_CONF_DIR}:/usr/share/logstash/pipeline:rw
+    ports:
+      - "${LOGSTASH_HOST_PORT_C}:9600"
+      - "${LOGSTASH_HOST_PORT_S}:5044"
+    networks:
+      - default
+
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.enable_ipv6: false
+    internal: true

@@ -1,0 +1,139 @@
+version: "3.9"
+
+x-common-variables:
+  &default-common
+  restart: always
+  env_file: ./.env
+  dns:
+    - ${DNS:-223.5.5.5}
+
+services:
+
+################  MySQL ########################
+
+# 采用官方二进制安装包安装，根据需要选择安装指定版本的mysql;
+# 可有效避免docker仓库通过apt直接安装,因网络问题key无法下载问题。
+# 缺点：采用该方式，会导致images文件大小会偏大一点
+  mysql-server:
+    << : *default-common
+    container_name: mysql
+    security_opt: # docker安全验证
+      - seccomp:unconfined
+    build:
+      context: ./
+      dockerfile: ./build/mysql/Dockerfile
+      args:
+        - HTTP_PROXY=${PROXY_URL}
+        - HTTPS_PROXY=${PROXY_URL}
+        - MYSQL_VER=${MYSQL_VERSION}
+        - GOSU_VERSION=${GOSU_VERSION}
+        - MYSQL_DATA_DIR=${MYSQL_DATA_DIR}
+        - CHANGE_SOURCE=${CHANGE_SOURCE}
+    command:
+      - mysqld
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --init-connect='SET NAMES utf8mb4;'
+      - --innodb-flush-log-at-trx-commit=0
+    environment:
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - TZ=${TZ}
+      # - MYSQL_ALLOW_EMPTY_PASSWORD="true"
+    volumes:
+      - ${MYSQL_DATA_DIR}:/var/lib/mysql:rw
+      #- ${MYSQL_CONF_FILE}:/etc/mysql/conf.d/docker.cnf:ro
+      - ${MYSQL_CONF_FILE}:/etc/mysql/my.cnf:ro
+      - ${MYSQL_LOG_DIR}:/var/log/mysql
+    ports:
+      - "3306:3306"
+    networks:
+      default:
+        aliases:
+          - mysql-server
+    deploy:
+     resources:
+        limits:
+           cpus: '4'
+           memory: 16G
+        reservations:
+           memory: 4G
+    platform: linux/x86_64
+
+  mysql8-server:
+    << : *default-common
+    container_name: mysql8
+    security_opt: # docker安全验证
+      - seccomp:unconfined
+    build:
+      context: ./
+      dockerfile: ./build/mysql/Dockerfile_gf
+      args:
+        - HTTP_PROXY=${PROXY_URL}
+        - HTTPS_PROXY=${PROXY_URL}
+        - MYSQL_VER=${MYSQL_VERSION}
+        - GOSU_VERSION=${GOSU_VERSION}
+        - CHANGE_SOURCE=${CHANGE_SOURCE}
+    command:
+      - mysqld
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --init-connect='SET NAMES utf8mb4;'
+      - --innodb-flush-log-at-trx-commit=0
+    # command: mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --init-connect='SET NAMES utf8mb4;' --innodb-flush-log-at-trx-commit=0
+    environment:
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - TZ=${TZ}
+      # - MYSQL_ALLOW_EMPTY_PASSWORD="true"
+    volumes:
+      - ${MYSQL_DATA_DIR}:/var/lib/mysql:rw
+      #- ${MYSQL_CONF_FILE}:/etc/mysql/conf.d/docker.cnf:ro
+      - ${MYSQL_CONF_FILE}:/etc/mysql/my.cnf:ro
+      - ${MYSQL_LOG_DIR}:/var/log/mysql
+    ports:
+      - "3306:3306"
+    networks:
+      default:
+        aliases:
+          - mysql8-server
+    deploy:
+     resources:
+        limits:
+           cpus: '4'
+           memory: 16G
+        reservations:
+           memory: 4G
+    platform: linux/x86_64
+
+  db-data-mysql:
+    << : *default-common
+    container_name: db-data-mysql
+    image: busybox
+    volumes:
+      - ${MYSQL_DATA_DIR}:/var/lib/mysql:rw
+
+################   mongo ########################
+  mongo:
+    << : *default-common
+    container_name: mongo
+    # image: mongo
+    image: mongo:${MONGODB_VERSION}
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+    ports:
+      - "27017:27017"
+    volumes:
+      - ${MONGO_DATA_DB_DIR}:/data/db:rw
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 16G
+        reservations:
+          memory: 1G
+    networks:
+      - default
+    command:
+      --auth

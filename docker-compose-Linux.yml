@@ -1,0 +1,11 @@
+version: "3.9"
+
+services:
+  nginx:
+    volumes:
+      - linux-sync:/var/www/html:rw # will be mounted on /var/www
+
+# that the important thing
+volumes:
+  linux-sync:
+    external: true

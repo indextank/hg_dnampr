@@ -1,0 +1,499 @@
+FROM debian:bullseye-slim
+
+ARG SOURCE_LIST
+
+ARG PHP_VERSION
+ARG PHP_SUFFIX
+ARG PHP_EXTENSIONS
+
+ARG CURL_VERSION
+ARG LIBSODIUM_VERSION
+ARG LIBICONV_VERSION
+ARG REDIS_EXT_VERSION
+ARG OPENSSL_VERSION
+ARG FREETYPE_VERSION
+ARG LIBWEBP_VERSION
+ARG IMAGICK_VERSION
+ARG IMAGICK_EXT_VERSION
+ARG MEMCACHED_VERSION
+ARG MONGODB_EXT_VERSION
+ARG SWOOLE_EXT_VERSION
+ARG GRPC_EXT_VERSION
+ARG LIBRDKAFKA_VERSION
+ARG RDKAFKA_EXT_VERSION
+ARG PROTOBUF_VERSION
+ARG PROTOBUF_EXT_VERSION
+ARG XDEBUG_EXT_VERSION
+ARG ZOOKEEPER_VERSION
+ARG ZOOKEEPER_EXT_VERSION
+ARG YAML_EXT_VERSION
+ARG CHANGE_SOURCE=false
+
+# prevent Debian's PHP packages from being installed
+# https://github.com/docker-library/php/pull/542
+RUN set -eux; \
+	{ \
+		echo 'Package: php*'; \
+		echo 'Pin: release *'; \
+		echo 'Pin-Priority: -1'; \
+	} > /etc/apt/preferences.d/no-debian-php
+
+ENV MC="-j$(nproc)"
+ENV TMP_DIR /tmp/extensions
+ENV APACHE_CONFDIR /etc/apache2
+ENV APACHE_LOG_DIR $APACHE_CONFDIR/logs
+ENV APACHE_ENVVARS $APACHE_CONFDIR/envvars
+ENV APACHE_RUN_DIR /var/run/apache2
+ENV APACHE_PID_FILE $APACHE_RUN_DIR/apache2.pid
+ENV APACHE_RUN_USER www-data
+ENV APACHE_RUN_GROUP www-data
+ENV PHP_INI_DIR /usr/local/etc/php
+
+# dependencies required for running "phpize"
+# persistent / runtime deps
+RUN set -eux; \
+	apt-get update; \
+	apt-get install -y --assume-yes --no-install-recommends apt-transport-https ca-certificates; \
+	cp -r /etc/apt/sources.list /etc/apt/sources.list.bak; \
+	rm -rf /var/lib/apt/lists/*; \
+	mkdir -p ${TMP_DIR}
+
+# 此处跟下面的CHANGE_SOURCE逻辑判断替换重复了，备用！
+# COPY ./conf/$SOURCE_LIST /etc/apt/sources.list
+
+RUN set -eux; \
+	if [ ${CHANGE_SOURCE} = true ]; then \
+		sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list; \
+	fi; \
+	mkdir -p "$PHP_INI_DIR/conf.d"; \
+	\
+	[ ! -d /var/www/html ]; \
+		mkdir -p /var/www/html; \
+		chmod 777 /var/www/html; \
+	\
+	# apt-get update; \
+	# apt-get install -y --assume-yes --no-install-recommends apt-transport-https ca-certificates; \
+	# mkdir -p ${TMP_DIR}; \
+	apt-get update; \
+	apt-get install -y --no-install-recommends apache2 gnupg dirmngr curl xz-utils apt-utils libldap-common autoconf dpkg-dev file g++ gcc libc-dev make pkg-config re2c wget cmake automake libtool build-essential libssl-dev libpq-dev; \
+	rm -rf /var/lib/apt/lists/*; \
+	\
+	sed -ri 's/^export ([^=]+)=(.*)$/: ${\1:=\2}\nexport \1/' "$APACHE_ENVVARS"; \
+	\
+	. "$APACHE_ENVVARS"; \
+	for dir in \
+		"$APACHE_LOCK_DIR" \
+		"$APACHE_RUN_DIR" \
+		"$APACHE_LOG_DIR" \
+	; do \
+		rm -rf "$dir"; \
+		mkdir -p "$dir"; \
+		chown "$APACHE_RUN_USER:$APACHE_RUN_GROUP" "$dir"; \
+		chmod 777 "$dir"; \
+	done; \
+	\
+	chown -R --no-dereference "$APACHE_RUN_USER:$APACHE_RUN_GROUP" "$APACHE_LOG_DIR"; \
+	chown $APACHE_RUN_USER:$APACHE_RUN_GROUP /var/www/html; \
+	\
+	# Apache + PHP requires preforking Apache for best results
+	a2dismod mpm_event && a2enmod headers rewrite mpm_prefork;
+
+# PHP files should be handled by PHP, and should be preferred over any other file type
+RUN { \
+		echo '<FilesMatch \.php$>'; \
+		echo '\tSetHandler application/x-httpd-php'; \
+		echo '</FilesMatch>'; \
+		echo; \
+		echo 'DirectoryIndex disabled'; \
+		echo 'DirectoryIndex index.php index.html index.htm'; \
+		echo; \
+		echo '<Directory /var/www/html/default>'; \
+		echo '\tOptions Indexes FollowSymLinks'; \
+		echo '\tAllowOverride None'; \
+		echo '\tRequire all granted'; \
+		echo '</Directory>'; \
+	} | tee "$APACHE_CONFDIR/conf-available/docker-php.conf" \
+	&& a2enconf docker-php
+
+# Apply stack smash protection to functions using local buffers and alloca()
+# Make PHP's main executable position-independent (improves ASLR security mechanism, and has no performance impact on x86_64)
+# Enable optimization (-O2)
+# Enable linker optimization (this sorts the hash buckets to improve cache locality, and is non-default)
+# https://github.com/docker-library/php/issues/272
+# -D_LARGEFILE_SOURCE and -D_FILE_OFFSET_BITS=64 (https://www.php.net/manual/en/intro.filesystem.php)
+ENV PHP_CFLAGS="-fstack-protector-strong -fpic -fpie -O2 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64"
+ENV PHP_CPPFLAGS="$PHP_CFLAGS"
+# ENV PHP_LDFLAGS="-Wl,-O1 -pie"
+
+# 解决错误： /lib/x86_64-linux-gnu/libpthread.so.0: error adding symbols: DSO missing from command line
+ENV PHP_LDFLAGS="-Wl,--copy-dt-needed-entries"
+
+ENV PHP_URL="https://www.php.net/distributions/php-${PHP_VERSION}.tar.xz"
+
+COPY ./build/php/ext-debian.sh ${TMP_DIR}
+COPY ./src/php/ ${TMP_DIR}
+COPY ./build/php/docker-php-* /usr/local/bin/
+WORKDIR ${TMP_DIR}
+
+RUN set -eux; \
+	\
+	chmod +x /usr/local/bin/docker-php-source; \
+	savedAptMark="$(apt-mark showmanual)"; \
+	# apt-get update; \
+	# apt-get install -y --no-install-recommends gnupg dirmngr; \
+	# rm -rf /var/lib/apt/lists/*; \
+	\
+	cd "${TMP_DIR}"; \
+	\
+	if [ ! -f "openssl-${OPENSSL_VERSION}.tar.gz" ]; then \
+    curl -L "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" -o openssl-${OPENSSL_VERSION}.tar.gz; \
+	fi; \
+	\
+	if [ ! -f "curl-${CURL_VERSION}.tar.xz" ]; then \
+    curl -L "https://curl.se/download/curl-${CURL_VERSION}.tar.xz" -o curl-${CURL_VERSION}.tar.xz; \
+	fi; \
+	\
+	if [ ! -f "libwebp-${LIBWEBP_VERSION}.tar.gz" ]; then \
+    curl -L "https://github.com/webmproject/libwebp/archive/v${LIBWEBP_VERSION}.tar.gz" -o libwebp-${LIBWEBP_VERSION}.tar.gz; \
+	fi; \
+	\
+	if [ ! -f "php-${PHP_VERSION}.tar.xz" ]; then \
+		curl -fsSL -o php-${PHP_VERSION}.tar.xz "$PHP_URL"; \
+	fi; \
+	\
+	apt-mark auto '.*' > /dev/null; \
+	apt-mark manual $savedAptMark > /dev/null; \
+	apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false
+
+RUN set -eux; \
+	\
+	savedAptMark="$(apt-mark showmanual)"; \
+	apt-get update; \
+	apt-get install -y --no-install-recommends \
+		apache2-dev \
+		libargon2-dev \
+		libcurl4-openssl-dev \
+		libonig-dev \
+		libsodium-dev \
+		libsqlite3-dev \
+		libssl-dev \
+		libreadline-dev \
+		libxml2-dev \
+		zlib1g-dev \
+		libfreetype6-dev \
+		libjpeg62-turbo-dev \
+		libpng-dev \
+		libzip-dev \
+		libvpx-dev \
+		libwebp-dev \
+		libmagickwand-dev \
+		libxpm-dev \
+		libicu-dev \
+		webp \
+		libavif-dev \
+		libxslt1-dev \
+		libpsl-dev \
+	; \
+	export MC="-j$(nproc)"; \
+	\
+	# ---------- Install openssl ----------
+	if [ ! -e "/usr/local/openssl/lib/libssl.a" ]; then \
+		cd "${TMP_DIR}"; \
+		tar xzf openssl-${OPENSSL_VERSION}.tar.gz; \
+		cd openssl-${OPENSSL_VERSION}; \
+		./config -Wl,-rpath=/usr/local/openssl/lib -fPIC --prefix=/usr/local/openssl --openssldir=/usr/local/openssl; \
+		make depend; \
+		make ${MC}; \
+		make install; \
+		\
+		if [ -e "/usr/bin/openssl" ]; then \
+			mv /usr/bin/openssl /usr/bin/openssl.old; \
+			ln -s /usr/local/openssl/bin/openssl /usr/bin/openssl; \
+		fi; \
+		\
+		# if [ ! -e "/usr/lib/x86_64-linux-gnu/libssl.so.1.1" ]; then \
+		# 	ln -sf /usr/local/openssl/lib/libssl.so.1.1 /usr/lib/x86_64-linux-gnu/libssl.so.1.1; \
+		# fi; \
+		# if [ ! -e "/usr/lib/x86_64-linux-gnu/libcrypto.so.1.1" ]; then \
+		# 	ln -sf /usr/local/openssl/lib/libcrypto.so.1.1 /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1; \
+		# fi; \
+		\
+		if [ ! -e "/usr/lib/x86_64-linux-gnu/libssl.so.3" ]; then \
+			ln -sf /usr/local/openssl/lib64/libssl.so.3 /usr/lib/x86_64-linux-gnu/libssl.so.3; \
+		fi; \
+		\
+		if [ ! -e "/usr/lib/x86_64-linux-gnu/libcrypto.so.3" ]; then \
+			ln -sf /usr/local/openssl/lib64/libcrypto.so.3 /usr/lib/x86_64-linux-gnu/libcrypto.so.3; \
+		fi; \
+		\
+		if [ ! -e "/usr/lib/libssl.so" ]; then \
+			ln -sf /usr/lib/x86_64-linux-gnu/libssl.so /usr/lib/; \
+		fi; \
+		\
+		if [ -f "/usr/local/openssl/lib/libcrypto.a" ]; then \
+		\
+			if [ ! -f "/usr/local/openssl/cert.pem" ]; then \
+				# echo "151.101.78.49 curl.haxx.se" >> /etc/hosts; \
+				wget --limit-rate=100M --tries=6 -c --no-check-certificate https://curl.haxx.se/ca/cacert.pem; \
+				cp -r cacert.pem /usr/local/openssl/cert.pem; \
+			fi; \
+		\
+		fi; \
+		\
+		echo "/usr/local/openssl/lib" >> /etc/ld.so.conf; \
+		ldconfig; \
+		# find / -name libssl.so; \
+		cd "${TMP_DIR}"; \
+		rm -fr openssl-${OPENSSL_VERSION}; \
+	fi; \
+	\
+	# ---------- Install freetype ----------
+	if [ ! -e "/usr/local/freetype/lib/libfreetype.la" ]; then \
+		cd "${TMP_DIR}"; \
+		tar xJf freetype-${FREETYPE_VERSION}.tar.xz; \
+		cd freetype-${FREETYPE_VERSION} > /dev/null; \
+		./configure --prefix=/usr/local/freetype --enable-freetype-config; \
+		make ${MC}; \
+		make install; \
+		ln -sf /usr/local/freetype/include/freetype2/* /usr/include/; \
+		[ -d /usr/lib/pkgconfig ] && /bin/cp /usr/local/freetype/lib/pkgconfig/freetype2.pc /usr/lib/pkgconfig/; \
+		cd "${TMP_DIR}"; \
+		rm -rf freetype-${FREETYPE_VERSION}; \
+	fi; \
+	\
+# ---------- Install curl ----------
+	if [ ! -e "/usr/local/curl/lib/libcurl.la" ]; then \
+		cd "${TMP_DIR}"; \
+		tar xJf curl-${CURL_VERSION}.tar.xz; \
+		cd curl-${CURL_VERSION}; \
+		./configure --prefix=/usr/local/curl --with-ssl=/usr/local/openssl; \
+		make ${MC}; \
+		make install; \
+		cd "${TMP_DIR}"; \
+		rm -fr curl-${CURL_VERSION}; \
+		\
+		if [ -e "/usr/local/curl/bin/curl" ]; then \
+			mv /usr/bin/curl /usr/bin/curl.bak; \
+			ln -sf /usr/local/curl/bin/curl /usr/bin/curl; \
+		fi; \
+	fi; \
+	\
+# ---------- Install libiconv ----------
+	if [ ! -e "/usr/local/lib/libiconv.la" ]; then \
+		cd "${TMP_DIR}"; \
+		tar xzf libiconv-${LIBICONV_VERSION}.tar.gz; \
+		cd libiconv-${LIBICONV_VERSION}; \
+		./configure --prefix=/usr/local/libiconv; \
+		make ${MC}; \
+		make install; \
+		cd "${TMP_DIR}"; \
+		rm -fr libiconv-${LIBICONV_VERSION}; \
+	fi; \
+	\
+# ---------- Install libsodium ----------
+	if [ ! -e "/usr/local/lib/libsodium.la" ]; then \
+		cd "${TMP_DIR}"; \
+		tar xzf libsodium-${LIBSODIUM_VERSION}.tar.gz; \
+		cd libsodium-stable; \
+		./configure --disable-dependency-tracking --enable-minimal; \
+		make ${MC}; \
+		make install; \
+		cd "${TMP_DIR}"; \
+		rm -fr libsodium-stable; \
+	fi; \
+	\
+# ---------- Install Webp plugin ----------
+	cd "${TMP_DIR}"; \
+	tar xzf libwebp-"${LIBWEBP_VERSION}".tar.gz; \
+	cd libwebp-"${LIBWEBP_VERSION}"; \
+	# 方法一：
+	./autogen.sh; \
+	./configure --enable-libwebpdecoder --enable-libwebpextras; \
+	make ${MC}; \
+	make install; \
+	ldconfig /usr/local/lib/; \
+	\
+	# 方法二：
+	# mkdir build; \
+	# cd build; \
+	# cmake ../; \
+	# make ${MC}; \
+	# make install; \
+	# cmake -DWEBP_BUILD_CWEBP=ON -DWEBP_BUILD_DWEBP=ON ../; \
+	cd "${TMP_DIR}"; \
+	rm -rf libwebp-"${LIBWEBP_VERSION}"; \
+	\
+	export \
+		CFLAGS="$PHP_CFLAGS" \
+		CPPFLAGS="$PHP_CPPFLAGS" \
+		LDFLAGS="$PHP_LDFLAGS" \
+	; \
+	mkdir php; \
+	tar -Jxf php-${PHP_VERSION}.tar.xz -C php --strip-components=1; \
+	touch "${TMP_DIR}/.docker-extracted"; \
+	cd php; \
+	# php-8.1.9版本， phpVersionId 输出为：80109
+	# php-8.0.22版本, phpVersionId 输出为：80022
+	# php-7.4.30版本, phpVersionId 输出为：70430；
+	#phpVersionId="$(grep "#define PHP_VERSION_ID " main/php_version.h | awk -F " " '{print $3}')"; \
+	phpMajor="$(grep "#define PHP_MAJOR_VERSION " main/php_version.h | awk -F " " '{print $3}')"; \
+	phpMinor="$(grep "#define PHP_MINOR_VERSION " main/php_version.h | awk -F " " '{print $3}')"; \
+	phpVersionId=${phpMajor}.${phpMinor}; \
+	\
+	gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
+	debMultiarch="$(dpkg-architecture --query DEB_BUILD_MULTIARCH)"; \
+	if [ ! -d /usr/include/curl ]; then \
+		ln -sT "/usr/include/$debMultiarch/curl" /usr/local/include/curl; \
+	fi; \
+	./configure \
+		--build="$gnuArch" \
+		--with-config-file-path="$PHP_INI_DIR" \
+		--with-config-file-scan-dir="$PHP_INI_DIR/conf.d" \
+		\
+		--with-apxs2 \
+		--with-pic \
+		--with-xsl \
+		--with-mhash \
+		--with-gettext \
+		--with-readline \
+		--with-sqlite3=/usr \
+		--with-pdo-sqlite=/usr \
+		--with-curl=/usr/local/curl \
+		--with-libdir="lib/$debMultiarch" \
+		\
+		# add postgresql support
+		--with-pgsql --with-pdo-pgsql \
+		\
+		# bundled pcre does not support JIT on s390x
+		$(test "$gnuArch" = 's390x-linux-gnu' && echo '--without-pcre-jit') \
+		\
+		# 小于php 5.6 (5.3 ~5.6)
+		$(test "$phpVersionId" = "5.6" && echo '--with-mysql=mysqlnd') \
+		\
+		# 大于等于php 7.0
+		$(test "$phpVersionId" = "7.0" && echo '--enable-mysqlnd --enable-intl') \
+		\
+		# PHP 5.6
+		$(test "$phpVersionId" = "5.6" && echo '--with-openssl --with-mcrypt --enable-zip --with-gd --enable-gd-native-ttf --with-libxml-dir=/usr --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization') \
+		\
+		# # PHP 7.0
+		$(test "$phpVersionId" = "7.0" && echo '--with-openssl --with-mcrypt --enable-zip --with-gd --enable-gd-native-ttf --with-libxml-dir=/usr --with-webp-dir=/usr/local --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization') \
+		\
+		# # PHP 7.1
+		$(test "$phpVersionId" = "7.1" && echo '--with-openssl --with-mcrypt --enable-zip --with-gd --enable-gd-native-ttf --with-libxml-dir=/usr --with-webp-dir=/usr/local --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization') \
+		\
+		# # PHP 7.2
+		$(test "$phpVersionId" = "7.2" && echo '--with-openssl --with-sodium=/usr/local --enable-zip --with-gd --with-libxml-dir=/usr --with-webp-dir=/usr/local --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization --with-password-argon2') \
+		\
+		# # PHP 7.3
+		$(test "$phpVersionId" = "7.3" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --enable-zip --with-gd --with-libxml-dir=/usr --with-webp-dir=/usr/local --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization --with-password-argon2') \
+		\
+		# PHP 7.4
+		$(test "$phpVersionId" = "7.4" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-pear --with-iconv-dir --enable-inline-optimization --with-password-argon2') \
+		\
+		# PHP 8.0
+		$(test "$phpVersionId" = "8.0" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-pear --with-iconv --with-password-argon2') \
+		\
+		# PHP 8.1
+		$(test "$phpVersionId" = "8.1" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-pear --with-iconv --with-password-argon2 --with-avif') \
+		\
+		# PHP 8.2
+		$(test "$phpVersionId" = "8.2" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-pear --with-iconv --with-password-argon2 --with-avif') \
+		\
+		# PHP 8.3
+		$(test "$phpVersionId" = "8.3" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-pear --with-iconv --with-password-argon2 --with-avif') \
+		\
+		--enable-option-checking=fatal \
+		--enable-mbstring \
+		--enable-ftp \
+		--with-mysqli=mysqlnd --with-pdo-mysql=mysqlnd \
+		# --enable-gd --with-freetype --with-jpeg --with-zlib \
+		--with-zlib \
+		--enable-xml \
+		--enable-bcmath \
+		--enable-shmop \
+		--enable-exif \
+		--enable-pcntl \
+		--enable-sockets \
+		--enable-soap \
+		--enable-sysvsem \
+		--enable-mbregex \
+		\
+		--disable-rpath \
+		--disable-cgi \
+		--disable-debug \
+		# --disable-fileinfo \
+		--disable-phpdbg \
+	; \
+	make ${MC}; \
+	make install; \
+	find -type f -name '*.a' -delete; \
+	find \
+		/usr/local \
+		-type f \
+		-perm '/0111' \
+		-exec sh -euxc ' \
+			strip --strip-all "$@" || : \
+		' -- '{}' + \
+	; \
+	make clean; \
+	\
+	# pecl channel-update pecl.php.net; \
+	# pecl update-channels; \
+# https://github.com/docker-library/php/issues/692 (copy default example "php.ini" files somewhere easily discoverable)
+	cp -v php.ini-* "$PHP_INI_DIR/"; \
+	\
+	cd "${TMP_DIR}"; \
+	rm -fr php; \
+	\
+	# \
+# reset apt-mark's "manual" list so that "purge --auto-remove" will remove all build dependencies
+	apt-mark auto '.*' > /dev/null; \
+	[ -z "$savedAptMark" ] || apt-mark manual $savedAptMark; \
+	find /usr/local -type f -executable -exec ldd '{}' ';' \
+		| awk '/=>/ { print $(NF-1) }' \
+		| sort -u \
+		| xargs -r dpkg-query --search \
+		| cut -d: -f1 \
+		| sort -u \
+		| xargs -r apt-mark manual \
+	; \
+	\
+	# apt-get install -y vim; \
+	apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
+	rm -rf /var/lib/apt/lists/*
+
+ADD ./build/php/apache2-foreground /usr/local/bin/
+ENV EXTENSIONS=",${PHP_EXTENSIONS},"
+
+RUN set -eux; \
+		\
+		chmod +x /usr/local/bin/apache2-foreground; \
+		chmod +x /usr/local/bin/docker-php-*; \
+		sed -i "s#<Directory /var/www/>#<Directory /var/www/html/>#g" /etc/apache2/apache2.conf; \
+		echo "ServerName 127.0.0.1:88" >>  /etc/apache2/apache2.conf; \
+		sed -i "s#ServerTokens OS#ServerTokens Prod#g" /etc/apache2/conf-available/security.conf; \
+		sed -i "s#ServerSignature On#ServerSignature Off#g" /etc/apache2/conf-available/security.conf; \
+		echo "ProtocolsHonorOrder On" >> /etc/apache2/conf-available/security.conf; \
+		sed -i "s/#AddDefaultCharset UTF-8/AddDefaultCharset UTF-8/g" /etc/apache2/conf-available/charset.conf; \
+		sed -i "s#Listen 80#Listen 88#g" /etc/apache2/ports.conf; \
+		\
+		if [ -f "/usr/local/bin/pecl" ]; then \
+			pecl channel-update pecl.php.net; \
+			pecl update-channels; \
+		fi; \
+		\
+		rm -rf /tmp/pear ~/.pearrc; \
+		\
+    chmod +x ext-debian.sh; \
+    bash ext-debian.sh | tee -a /tmp/ext-debian.log; \
+		rm -fr ${TMP_DIR}
+
+ENTRYPOINT ["docker-php-entrypoint"]
+# https://httpd.apache.org/docs/2.4/stopping.html#gracefulstop
+STOPSIGNAL SIGWINCH
+
+WORKDIR /var/www/html
+
+EXPOSE 88
+CMD ["apache2-foreground"]

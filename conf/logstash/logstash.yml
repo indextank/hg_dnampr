@@ -1,0 +1,8 @@
+http.host: 0.0.0.0
+node.name: logstash
+pipeline.batch.delay: 5
+pipeline.batch.size: 500
+pipeline.workers: 8
+xpack.monitoring.elasticsearch.hosts:
+- http://elasticsearch:9200
+xpack.monitoring.enabled: false
