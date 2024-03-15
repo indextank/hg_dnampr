@@ -1,4 +1,4 @@
-`HG_NAMPR`是一款全功能的docker一键部署套件。当前支持Nginx + Apache + PHP +MySQL 8 + Mongodb + Redis+ELK等，满足日常开发及生产环境使用。
+`HG_DNAMPR`是一款全功能的docker一键部署套件。当前支持Nginx + Apache + PHP +MySQL 8 + Mongodb + Redis+ELK等，满足日常开发及生产环境使用。
 
 即可满足本地开发环境的使用，亦可做为生产环境服务端的部署，同时也是学习docker编排的最好demo实例。
 
@@ -6,7 +6,7 @@
 注意: 本项目在保证规范统一的大前提下，针对同一方式的，可能会故意使用不同写法，达到同样效果，目的就是为了便于有兴趣的同学，便于docker编排学习。
 ```
 
-### HG_NAMPR 项目特点：
+### HG_DNAMPR 项目特点：
 
 1. `100%`开源，遵循Docker标准
 
