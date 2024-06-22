@@ -316,7 +316,11 @@ docker_setup_db() {
 		if [ -n "$MYSQL_DATABASE" ]; then
 			mysql_note "Giving user ${MYSQL_USER} access to schema ${MYSQL_DATABASE}"
 			docker_process_sql --database=mysql <<<"GRANT ALL ON \`${MYSQL_DATABASE//_/\\_}\`.* TO '$MYSQL_USER'@'%' ;"
+		else
+			docker_process_sql --database=mysql <<<"GRANT Alter, Alter Routine, Create, Create Routine, Create Temporary Tables, Create User, Create View, Delete, Drop, Event, Execute, Index, Insert, Lock Tables, Select, Show Databases, Show View, Trigger, Super, Update ON *.* TO '$MYSQL_USER'@'%' ;"
 		fi
+
+		docker_process_sql --database=mysql <<<"flush privileges ;"
 	fi
 }
 

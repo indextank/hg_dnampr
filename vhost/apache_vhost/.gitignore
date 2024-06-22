@@ -1,6 +1,6 @@
 .git
 !.gitignore
-.conf
+*.conf
 bak
 certs
 */.DS_Store

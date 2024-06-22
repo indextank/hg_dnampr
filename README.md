@@ -1,18 +1,16 @@
-`HG_DNAMPR`是一款全功能的docker一键部署套件。当前支持Nginx + Apache + PHP +MySQL 8 + Mongodb + Redis+ELK等，满足日常开发及生产环境使用。
+`HG_NAMPR`是一款全功能的docker一键部署套件。当前支持Nginx + Apache + PHP +MySQL 8 + Mongodb + Redis等，满足日常开发及生产环境使用。
 
 即可满足本地开发环境的使用，亦可做为生产环境服务端的部署，同时也是学习docker编排的最好demo实例。
 
-```
-注意: 本项目在保证规范统一的大前提下，针对同一方式的，可能会故意使用不同写法，达到同样效果，目的就是为了便于有兴趣的同学，便于docker编排学习。
-```
+`PS：本项目在保证规范统一的大前提下，针对同一方式的，可能会故意使用不同写法，达到同样效果，目的就是为了便于有兴趣的同学，便于docker编排学习。`
 
-### HG_DNAMPR 项目特点：
+### HG_NAMPR 项目特点：
 
 1. `100%`开源，遵循Docker标准
 
-2. 支持代理配置，解决国内无法正常安装问题（详见.env.example）
+2. 采用最新Docker版本制作
 
-3. 支持**多版本PHP**共存，可任意切换、扩展（PHP7.2、PHP8.1、PHP8.2、PHP8.3...)
+3. 支持**多版本PHP**共存，可任意切换（PHP7.2、PHP8.1、PHP8.2、PHP8.3...)
 
 4. 默认php支持webp图片格式
 
@@ -67,15 +65,17 @@
 
 2. `clone`项目：
     ```
-    $ git clone git@github.com:indextank/hg_dnampr.git
+    $ git clone https://gitee.com/indextank/HG_NAMPR.git
     ```
-
-    > 注意：使用之前，需要先将.env.example重命名为.env
-
 3. 如果不是`root`用户，还需将当前用户加入`docker`用户组：
     ```
     $ sudo gpasswd -a ${USER} docker
     ```
+```
+注意：使用前，请先将.env.example重命名为.env,并修改其中的相关路径及参数
+- 默认web路径请根据实际需要修改.
+- 根据自己服务器的CPU和内存大小，调整.env中的相关cpu和memory参数.
+```
 4. 常用命令：
     > 为了强制docker构建镜像时不用缓存，执行带–no-cache参数的docker build命令
     > eg: docker-compose -f docker-compose-lnamp.yml build --no-cache python311

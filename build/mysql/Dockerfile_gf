@@ -10,8 +10,11 @@ RUN set -eux; \
 	mkdir -p ${TMP_DIR}; \
 	\
 	if [ ${CHANGE_SOURCE} = true ]; then \
-		sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources; \
+		sed -i 's@deb.debian.org@mirrors.ustc.edu.cn@g' /etc/apt/sources.list.d/debian.sources; \
 	fi; \
+    \
+	# 关闭 HTTP Pipelining 特性，在 apt 2.1.9 及以后的版本中，apt 的 HTTP Pipelining 特性与 Nginx 服务器疑似存在一定的不兼容问题
+	echo "Acquire::http::Pipeline-Depth \"0\";" > /etc/apt/apt.conf.d/99nopipelining; \
 	\
 	apt-get update; \
 	apt-get install -y --assume-yes --no-install-recommends apt-transport-https ca-certificates; \

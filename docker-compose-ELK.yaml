@@ -1,4 +1,4 @@
-version: "3.9"
+version: "3"
 
 x-common:
   &default-common
@@ -106,5 +106,5 @@ networks:
   default:
     driver: bridge
     driver_opts:
-      com.docker.network.enable_ipv6: false
+      com.docker.network.enable_ipv6: 0
     internal: true

@@ -1,4 +1,4 @@
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 ARG CHANGE_SOURCE=false
 ARG MYSQL_VER
@@ -12,7 +12,7 @@ ENV MYSQL_INSTALL_DIR=/usr/local/mysql
 RUN set -eux; \
 	\
 	if [ ${CHANGE_SOURCE} = true ]; then \
-		sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list; \
+		sed -i 's@deb.debian.org@mirrors.ustc.edu.cn@g' /etc/apt/sources.list.d/debian.sources; \
 	fi; \
 	\
 	apt-get update; \
@@ -63,6 +63,9 @@ RUN set -eux; \
 	mkdir /docker-entrypoint-initdb.d; \
 	\
 	cd ${TMP_DIR}; \
+	\
+	apt-get update; \
+	apt-get install -y --no-install-recommends wget; \
 	\
 	if [ ! -f mysql-${MYSQL_VER}-linux-glibc2.28-x86_64.tar.xz ]; then \
 		wget --limit-rate=100M --tries=6 -c --no-check-certificate https://cdn.mysql.com//Downloads/MySQL-8.0/mysql-${MYSQL_VER}-linux-glibc2.28-x86_64.tar.xz; \

@@ -1,3 +1,11 @@
+[client]
+port = 3306
+socket = /tmp/mysql.sock
+
+[mysql]
+prompt="MySQL [\d]> "
+no-auto-rehash
+
 [mysqld]
 skip-name-resolve
 
@@ -42,7 +50,6 @@ thread_cache_size = 64
 ft_min_word_len = 4
 
 log_bin = mysql-bin
-binlog_format = mixed
 binlog_expire_logs_seconds = 604800
 
 log_error = /var/log/mysql/mysql-error.log
@@ -55,6 +62,8 @@ explicit_defaults_for_timestamp
 
 skip-external-locking
 
+lower_case_table_names=2
+
 default_storage_engine = InnoDB
 innodb_file_per_table = 1
 innodb_open_files = 500
@@ -66,7 +75,7 @@ innodb_thread_concurrency = 4
 innodb_purge_threads = 32
 innodb_flush_log_at_trx_commit = 2
 innodb_log_buffer_size = 64M
-innodb_log_file_size = 128M
+innodb_redo_log_capacity = 128M
 innodb_log_files_in_group = 32
 innodb_max_dirty_pages_pct = 90
 innodb_lock_wait_timeout = 1800

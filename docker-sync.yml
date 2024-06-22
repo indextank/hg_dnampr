@@ -1,4 +1,4 @@
-version: '2'
+version: '3.9'
 
 # https://docker-sync.readthedocs.io/en/latest/getting-started/configuration.html#docker-compose-yml
 # https://github.com/EugenMayer/docker-sync-boilerplate

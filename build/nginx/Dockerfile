@@ -5,29 +5,28 @@
 #
 FROM debian:bookworm-slim
 
-ARG NGINX_VERSION
-ARG CHANGE_SOURCE=false
-
 LABEL maintainer="NGINX Docker Maintainers <docker-maint@nginx.com>"
 
-# ENV NGINX_VERSION   1.25.4
-ENV NJS_VERSION     0.8.3
+ARG CHANGE_SOURCE=false
+ARG NGINX_VERSION
+
+ENV NJS_VERSION     0.8.4
+ENV NJS_RELEASE     3~bookworm
 ENV PKG_RELEASE     1~bookworm
 
-COPY ./build/nginx/debian.sources /etc/apt/sources.list.d/
-
 RUN set -x \
-	# && if [ ${CHANGE_SOURCE} = true ]; then \
-	# 	sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources; \
-	# fi \
+	&& if [ ${CHANGE_SOURCE} = true ]; then \
+		sed -i 's@deb.debian.org@mirrors.ustc.edu.cn@g' /etc/apt/sources.list.d/debian.sources; \
+	fi \
 # create nginx user/group first, to be consistent throughout docker variants
     && groupadd --system --gid 101 nginx \
     && useradd --system --gid nginx --no-create-home --home /nonexistent --comment "nginx user" --shell /bin/false --uid 101 nginx \
     && apt-get update \
     && apt-get install --no-install-recommends --no-install-suggests -y gnupg1 ca-certificates \
     && \
+    mkdir -p /etc/apt/keyrings; \
     NGINX_GPGKEY=573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62; \
-    NGINX_GPGKEY_PATH=/usr/share/keyrings/nginx-archive-keyring.gpg; \
+    NGINX_GPGKEY_PATH=/etc/apt/keyrings/nginx-archive-keyring.gpg; \
     export GNUPGHOME="$(mktemp -d)"; \
     found=''; \
     for server in \
@@ -42,13 +41,12 @@ RUN set -x \
     rm -rf "$GNUPGHOME"; \
     apt-get remove --purge --auto-remove -y gnupg1 && rm -rf /var/lib/apt/lists/* \
     && dpkgArch="$(dpkg --print-architecture)" \
-#https://nginx.org/packages/mainline/debian/pool/nginx/n/
     && nginxPackages=" \
         nginx=${NGINX_VERSION}-${PKG_RELEASE} \
         nginx-module-xslt=${NGINX_VERSION}-${PKG_RELEASE} \
         nginx-module-geoip=${NGINX_VERSION}-${PKG_RELEASE} \
         nginx-module-image-filter=${NGINX_VERSION}-${PKG_RELEASE} \
-        nginx-module-njs=${NGINX_VERSION}+${NJS_VERSION}-${PKG_RELEASE} \
+        nginx-module-njs=${NGINX_VERSION}+${NJS_VERSION}-${NJS_RELEASE} \
     " \
     && case "$dpkgArch" in \
         amd64|arm64) \
@@ -69,6 +67,8 @@ RUN set -x \
 # save list of currently-installed packages so build dependencies can be cleanly removed later
             && savedAptMark="$(apt-mark showmanual)" \
             \
+            && wget https://nginx.org/packages/keys/nginx_signing.key \
+            && cat nginx_signing.key | apt-key add - \
 # build .deb files from upstream's source packages (which are verified by apt-get)
             && apt-get update \
             && apt-get build-dep -y $nginxPackages \
@@ -112,24 +112,16 @@ RUN set -x \
     && ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log \
 # create a docker-entrypoint.d directory
-    && mkdir /docker-entrypoint.d \
-    && rm -fr /etc/nginx/html
+    && mkdir /docker-entrypoint.d
 
 COPY ./build/nginx/docker-entrypoint.sh /
-# COPY ./build/nginx/10-listen-on-ipv6-by-default.sh /docker-entrypoint.d
+COPY ./build/nginx/10-listen-on-ipv6-by-default.sh /docker-entrypoint.d
 COPY ./build/nginx/15-local-resolvers.envsh /docker-entrypoint.d
 COPY ./build/nginx/20-envsubst-on-templates.sh /docker-entrypoint.d
 COPY ./build/nginx/30-tune-worker-processes.sh /docker-entrypoint.d
-
-RUN chmod 777 /docker-entrypoint.sh \
-    && chmod 777 /docker-entrypoint.d
-
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
-COPY ./conf/nginx/nginx.conf /etc/nginx/
-COPY ./vhost/nginx_vhost/certs/* /etc/nginx/conf/ssl/
-
-EXPOSE 80 443
+EXPOSE 80
 
 STOPSIGNAL SIGQUIT
 

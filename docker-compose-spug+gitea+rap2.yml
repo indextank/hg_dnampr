@@ -1,69 +1,68 @@
-version: "3.9"
-
-x-common:
+x-common-variables:
   &default-common
   restart: always
   env_file: ./.env
   dns:
-    - ${DNS:-180.76.76.76}
+    - ${DNS:-8.8.8.8}
+    - ${DNS:-114.114.114.114}
 
 services:
 
 ################################  Spug  ###################################
   spug:
-      image: openspug/spug-service
-      container_name: spug
-      privileged: true
-      restart: always
-      volumes:
-        - ${SPUG_DATA_DIR}/service:/data/spug
-        - ${SPUG_DATA_DIR}/repos:/data/repos
-      ports:
-        # 如果80端口被占用可替换为其他端口，例如: - "8000:80"
-        - "${SPUG_PORT}:80"
-      environment:
-        - MYSQL_DATABASE=${SPUG_DB_DATABASE}
-        - MYSQL_USER=${SPUG_DB_USER}
-        - MYSQL_PASSWORD=${SPUG_DB_PASSWORD}
-        - MYSQL_HOST=${SPUG_DB_ENGINE}
-        - MYSQL_PORT=${SPUG_DB_PORT}
-      deploy:
-        resources:
-            limits:
-              cpus: '4'
-              memory: 2G
-            reservations:
-              cpus: '0.5'
-              memory: 256M
-      networks:
-        - lnamp_network
-      depends_on:
-        - mysql-server
+    << : *default-common
+    image: openspug/spug-service
+    container_name: spug
+    privileged: true
+    volumes:
+      - ${SPUG_DATA_DIR}/service:/data/spug
+      - ${SPUG_DATA_DIR}/repos:/data/repos
+    ports:
+      # 如果80端口被占用可替换为其他端口，例如: - "8000:80"
+      - "${SPUG_PORT}:80"
+    environment:
+      - MYSQL_DATABASE=${SPUG_DB_DATABASE}
+      - MYSQL_USER=${SPUG_DB_USER}
+      - MYSQL_PASSWORD=${SPUG_DB_PASSWORD}
+      - MYSQL_HOST=${SPUG_DB_ENGINE}
+      - MYSQL_PORT=${SPUG_DB_PORT}
+    deploy:
+      resources:
+          limits:
+            cpus: '4'
+            memory: 2G
+          reservations:
+            cpus: '0.5'
+            memory: 256M
+    networks:
+      - lnamp_network
+    depends_on:
+      - mysql
 
 ################################  Gitea ###################################
   gitea:
-      image: gitea/gitea:latest
-      container_name: gitea
-      environment:
-        - USER_UID=1000
-        - USER_GID=1000
-        - GITEA__database__DB_TYPE=${GITEA_DB_ENGINE}
-        - GITEA__database__HOST=${GITEA_DB_ENGINE}:${GITEA_DB_PORT}
-        - GITEA__database__NAME=${GITEA_DB_DATABASE}
-        - GITEA__database__USER=${GITEA_DB_USER}
-        - GITEA__database__PASSWD=${GITEA_DB_PASSWORD}
-      restart: always
-      networks:
-        - lnamp_network
-      volumes:
-        - ${DATA_PATH_HOST}/gitea:/data
-        - /etc/timezone:/etc/timezone:ro
-        - /etc/localtime:/etc/localtime:ro
-      ports:
-        - "${GITEA_PORT}:3000"
-        - "${GITEA_SSH_PORT}:22"
-      depends_on:
-        - mysql-server
+    << : *default-common
+    image: gitea/gitea:latest
+    container_name: gitea
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__database__DB_TYPE=${GITEA_DB_ENGINE}
+      - GITEA__database__HOST=${GITEA_DB_ENGINE}:${GITEA_DB_PORT}
+      - GITEA__database__NAME=${GITEA_DB_DATABASE}
+      - GITEA__database__USER=${GITEA_DB_USER}
+      - GITEA__database__PASSWD=${GITEA_DB_PASSWORD}
+    networks:
+      - lnamp_network
+    volumes:
+      - ${DATA_PATH_HOST}/gitea:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "${GITEA_PORT}:3000"
+      - "${GITEA_SSH_PORT}:22"
+    depends_on:
+      - mysql
 
 
 ################################  rap接口平台 ####################
@@ -85,7 +84,7 @@ services:
       - SERVE_PORT=38080
       # if you have your own mysql, config it here, and disable the 'mysql' config blow
       - MYSQL_URL=mysql # links will maintain /etc/hosts, just use 'container_name'
-      - MYSQL_PORT=${RAP2_DB_PORT}
+      - MYSQL_PORT=${MYSQL_HOST_PORT}
       - MYSQL_USERNAME=${RAP2_MYSQL_USER}
       - MYSQL_PASSWD=${RAP2_MYSQL_PASSWORD}
       - MYSQL_SCHEMA=${RAP2_MYSQL_SCHEMA}
@@ -105,17 +104,23 @@ services:
     # command: node dispatch.js
     depends_on:
       - redis
-      - mysql-server
+      - mysql
 
- mysql-server:
-  extends:
-   file: compose_databases.yaml
-   service: mysql-server
+  mysql:
+    extends:
+      file: compose_databases.yaml
+      service: mysql-server
 
- db-data-mysql:
-  extends:
-   file: compose_databases.yaml
-   service: db-data-mysql
+  db-data-mysql:
+    extends:
+      file: compose_databases.yaml
+      service: db-data-mysql
+
+################   redis  ########################
+  redis:
+    extends:
+      file: compose_databases.yaml
+      service: redis-server
 
 networks:
   lnamp_network:
