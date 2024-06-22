@@ -1,10 +1,10 @@
-`HG_NAMPR`是一款全功能的docker一键部署套件。当前支持Nginx + Apache + PHP +MySQL 8 + Mongodb + Redis等，满足日常开发及生产环境使用。
+`hg_dnampr`是一款全功能的docker一键部署套件。当前支持Nginx + Apache + PHP +MySQL 8 + Mongodb + Redis + ELK等，满足日常开发及生产环境使用。
 
 即可满足本地开发环境的使用，亦可做为生产环境服务端的部署，同时也是学习docker编排的最好demo实例。
 
 `PS：本项目在保证规范统一的大前提下，针对同一方式的，可能会故意使用不同写法，达到同样效果，目的就是为了便于有兴趣的同学，便于docker编排学习。`
 
-### HG_NAMPR 项目特点：
+### hg_dnampr 项目特点：
 
 1. `100%`开源，遵循Docker标准
 
@@ -49,7 +49,7 @@
     php 7.4测试地址：https://74.default.com
 
 5、为了提高国内下载构建速度，相关软件包全部放在根目录下的src下，请通过百度网盘下载后，放在根目录下即可。
-  网盘下载链接：https://pan.baidu.com/s/1dkEz_BZJo1901fxWTFxiXA 提取码：6eao
+  网盘下载链接：https://pan.baidu.com/s/1y5ckPX6_Y6_xhXOq91oFzQ?pwd=8ygl 提取码：8ygl
 ```
 
 # 1.效果演示：
@@ -65,7 +65,7 @@
 
 2. `clone`项目：
     ```
-    $ git clone https://gitee.com/indextank/HG_NAMPR.git
+    $ git clone https://gitee.com/indextank/hg_dnampr.git
     ```
 3. 如果不是`root`用户，还需将当前用户加入`docker`用户组：
     ```
