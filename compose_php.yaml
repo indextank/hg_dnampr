@@ -108,7 +108,6 @@ services:
         PHP_VERSION: ${PHP81_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE}
         PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-        # MORE_EXTENSION_INSTALLER: php81.sh
         LIBWEBP_VERSION: ${LIBWEBP_VERSION}
         XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
         SWOOLE_EXT_VERSION: ${SWOOLE_EXT_VERSION}
@@ -146,13 +145,12 @@ services:
     container_name: php80_apache
     build:
       context: ./
-      dockerfile: ./build/php/Dockerfile
+      dockerfile: ./build/php/Dockerfile2
       args:
         SOURCE_LIST: bullseye
         PHP_VERSION: ${PHP80_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE}
         PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-        # MORE_EXTENSION_INSTALLER: php80.sh
         LIBWEBP_VERSION: ${LIBWEBP_VERSION}
         XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
         SWOOLE_EXT_VERSION: ${SWOOLE_EXT_VERSION}
@@ -190,15 +188,14 @@ services:
     container_name: php74_apache
     build:
       context: ./
-      dockerfile: ./build/php/Dockerfile
+      dockerfile: ./build/php/Dockerfile2
       args:
         SOURCE_LIST: bullseye
         PHP_VERSION: ${PHP74_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE}
         PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-        # MORE_EXTENSION_INSTALLER: php74.sh
         LIBWEBP_VERSION: ${LIBWEBP_VERSION}
-        SWOOLE_EXT_VERSION: ${SWOOLE_EXT_VERSION}
+        SWOOLE_EXT_VERSION: ${SWOOLE7_EXT_VERSION}
         XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
         GRPC_EXT_VERSION: ${GRPC_EXT_VERSION}
         REDIS_EXT_VERSION: ${REDIS_EXT_VERSION}
@@ -234,7 +231,7 @@ services:
     container_name: php72_apache
     build:
       context: ./
-      dockerfile: ./build/php/Dockerfile
+      dockerfile: ./build/php/Dockerfile2
       args:
         SOURCE_LIST: bullseye
         PHP_VERSION: ${PHP72_VERSION}
@@ -255,7 +252,7 @@ services:
         IMAGICK_EXT_VERSION: ${IMAGICK_EXT_VERSION}
         IMAGICK_VERSION: ${IMAGICK_VERSION}
         MEMCACHED_VERSION: ${MEMCACHED_VERSION}
-        OPENSSL_VERSION: ${OPENSSL_VERSION}
+        OPENSSL_VERSION: ${OPENSSL_VERSION_11}
         CURL_VERSION: ${CURL_VERSION}
         LIBSODIUM_VERSION: ${LIBSODIUM_VERSION}
         LIBICONV_VERSION: ${LIBICONV_VERSION}

@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM debian:bullseye-slim
 
 ARG SOURCE_LIST
 
@@ -54,21 +54,26 @@ ENV PHP_INI_DIR /usr/local/etc/php
 RUN set -eux; \
 	apt-get update; \
 	apt-get install -y --assume-yes --no-install-recommends apt-transport-https ca-certificates; \
+	cp -r /etc/apt/sources.list /etc/apt/sources.list.bak; \
 	rm -rf /var/lib/apt/lists/*; \
 	mkdir -p ${TMP_DIR}
 
+# 此处跟下面的CHANGE_SOURCE逻辑判断替换重复了，备用！
+# COPY ./conf/$SOURCE_LIST /etc/apt/sources.list
+
 RUN set -eux; \
-	\
 	if [ ${CHANGE_SOURCE} = true ]; then \
-		sed -i 's@deb.debian.org@mirrors.ustc.edu.cn@g' /etc/apt/sources.list.d/debian.sources; \
+		sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list; \
 	fi; \
-	\
 	mkdir -p "$PHP_INI_DIR/conf.d"; \
 	\
 	[ ! -d /var/www/html ]; \
 		mkdir -p /var/www/html; \
 		chmod 777 /var/www/html; \
 	\
+	# apt-get update; \
+	# apt-get install -y --assume-yes --no-install-recommends apt-transport-https ca-certificates; \
+	# mkdir -p ${TMP_DIR}; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends apache2 gnupg dirmngr curl xz-utils apt-utils libldap-common autoconf dpkg-dev file g++ gcc libc-dev make pkg-config re2c wget cmake automake libtool build-essential libssl-dev libpq-dev; \
 	rm -rf /var/lib/apt/lists/*; \
@@ -80,8 +85,6 @@ RUN set -eux; \
 		"$APACHE_LOCK_DIR" \
 		"$APACHE_RUN_DIR" \
 		"$APACHE_LOG_DIR" \
-		# https://salsa.debian.org/apache-team/apache2/-/commit/b97ca8714890ead1ba6c095699dde752e8433205
-		"$APACHE_RUN_DIR/socks" \
 	; do \
 		rm -rf "$dir"; \
 		mkdir -p "$dir"; \
@@ -180,7 +183,6 @@ RUN set -eux; \
 		libfreetype6-dev \
 		libjpeg62-turbo-dev \
 		libpng-dev \
-		libpng16-16 \
 		libzip-dev \
 		libvpx-dev \
 		libwebp-dev \
@@ -191,64 +193,55 @@ RUN set -eux; \
 		libavif-dev \
 		libxslt1-dev \
 		libpsl-dev \
-		perl-modules \
 	; \
 	export MC="-j$(nproc)"; \
-	\
-	if [ -e "/usr/lib/x86_64-linux-gnu/libpng16.so.16" ]; then \
-		echo "/usr/lib/x86_64-linux-gnu" >> /etc/ld.so.conf.d/libpng.conf; \
-		ldconfig; \
-	fi; \
 	\
 	# ---------- Install openssl ----------
 	if [ ! -e "/usr/local/openssl/lib/libssl.a" ]; then \
 		cd "${TMP_DIR}"; \
 		tar xzf openssl-${OPENSSL_VERSION}.tar.gz; \
 		cd openssl-${OPENSSL_VERSION}; \
-		# ./config -Wl,-rpath=/usr/local/openssl/lib -fPIC --prefix=/usr/local/openssl --openssldir=/usr/local/openssl; \
-		./config --prefix=/usr/local/openssl --openssldir=/usr/local/openssl shared zlib; \
+		./config -Wl,-rpath=/usr/local/openssl/lib -fPIC --prefix=/usr/local/openssl --openssldir=/usr/local/openssl; \
 		make depend; \
 		make ${MC}; \
 		make install; \
 		\
 		if [ -e "/usr/bin/openssl" ]; then \
-			mv /usr/bin/c_rehash /usr/bin/c_rehash.old; \
 			mv /usr/bin/openssl /usr/bin/openssl.old; \
 			ln -s /usr/local/openssl/bin/openssl /usr/bin/openssl; \
 		fi; \
 		\
-		if [[ $OPENSSL_VERSION =~ ^1\.1 ]]; then \
-			ln -sf /usr/local/openssl/lib/libssl.so.1.1 /usr/lib/x86_64-linux-gnu/libssl.so.1.1; \
-			ln -sf /usr/local/openssl/lib/libcrypto.so.1.1 /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1; \
-			echo "/usr/local/openssl/lib" > /etc/ld.so.conf.d/openssl-1.1.conf; \
-		else \
-			rm -fr /usr/bin/openssl; \
-			rm -fr /usr/include/openssl; \
-			rm -fr /usr/lib/libssl.so; \
-			rm -fr /usr/lib/libcrypto.so; \
-			ln -sf /usr/local/openssl/bin/openssl /usr/bin/openssl; \
-			ln -sf /usr/local/openssl/include/openssl /usr/include/openssl; \
-			ln -sf /usr/local/openssl/lib64/libssl.so /usr/lib/libssl.so; \
-			ln -sf /usr/local/openssl/lib64/libcrypto.so /usr/lib/libcrypto.so; \
-			echo "/usr/local/openssl/lib64" > /etc/ld.so.conf.d/openssl-3.2.2.conf; \
-			# rm -fr /usr/lib/x86_64-linux-gnu/libssl.so.3; \
-			# ln -sf /usr/local/openssl/lib64/libssl.so.3 /usr/lib/x86_64-linux-gnu/libssl.so.3; \
-			# \
-			# rm -fr /usr/lib/x86_64-linux-gnu/libcrypto.so.3; \
-			# ln -sf /usr/local/openssl/lib64/libcrypto.so.3 /usr/lib/x86_64-linux-gnu/libcrypto.so.3; \
+		# if [ ! -e "/usr/lib/x86_64-linux-gnu/libssl.so.1.1" ]; then \
+		# 	ln -sf /usr/local/openssl/lib/libssl.so.1.1 /usr/lib/x86_64-linux-gnu/libssl.so.1.1; \
+		# fi; \
+		# if [ ! -e "/usr/lib/x86_64-linux-gnu/libcrypto.so.1.1" ]; then \
+		# 	ln -sf /usr/local/openssl/lib/libcrypto.so.1.1 /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1; \
+		# fi; \
+		\
+		if [ ! -e "/usr/lib/x86_64-linux-gnu/libssl.so.3" ]; then \
+			ln -sf /usr/local/openssl/lib64/libssl.so.3 /usr/lib/x86_64-linux-gnu/libssl.so.3; \
 		fi; \
 		\
-		# if [ ! -e "/usr/lib/libssl.so" ]; then \
-		# 	ln -sf /usr/lib/x86_64-linux-gnu/libssl.so /usr/lib/; \
-		# fi; \
-		# \
-		# if [ ! -f "/usr/local/openssl/cert.pem" ]; then \
-		# 	wget --limit-rate=100M --tries=6 -c --no-check-certificate https://curl.haxx.se/ca/cacert.pem; \
-		# 	cp -r cacert.pem /usr/local/openssl/cert.pem; \
-		# fi; \
-		# \
-		ldconfig; \
+		if [ ! -e "/usr/lib/x86_64-linux-gnu/libcrypto.so.3" ]; then \
+			ln -sf /usr/local/openssl/lib64/libcrypto.so.3 /usr/lib/x86_64-linux-gnu/libcrypto.so.3; \
+		fi; \
 		\
+		if [ ! -e "/usr/lib/libssl.so" ]; then \
+			ln -sf /usr/lib/x86_64-linux-gnu/libssl.so /usr/lib/; \
+		fi; \
+		\
+		if [ -f "/usr/local/openssl/lib/libcrypto.a" ]; then \
+		\
+			if [ ! -f "/usr/local/openssl/cert.pem" ]; then \
+				# echo "151.101.78.49 curl.haxx.se" >> /etc/hosts; \
+				wget --limit-rate=100M --tries=6 -c --no-check-certificate https://curl.haxx.se/ca/cacert.pem; \
+				cp -r cacert.pem /usr/local/openssl/cert.pem; \
+			fi; \
+		\
+		fi; \
+		\
+		echo "/usr/local/openssl/lib" >> /etc/ld.so.conf; \
+		ldconfig; \
 		# find / -name libssl.so; \
 		cd "${TMP_DIR}"; \
 		rm -fr openssl-${OPENSSL_VERSION}; \
@@ -374,46 +367,47 @@ RUN set -eux; \
 		# bundled pcre does not support JIT on s390x
 		$(test "$gnuArch" = 's390x-linux-gnu' && echo '--without-pcre-jit') \
 		\
-		# # 小于php 5.6 (5.3 ~5.6)
-		# $(test "$phpVersionId" = "5.6" && echo '--with-mysql=mysqlnd') \
-		# \
-		# # 大于等于php 7.0
-		# $(test "$phpVersionId" = "7.0" && echo '--enable-mysqlnd --enable-intl') \
-		# \
-		# # PHP 5.6
-		# $(test "$phpVersionId" = "5.6" && echo '--with-openssl --with-mcrypt --enable-zip --with-gd --enable-gd-native-ttf --with-libxml-dir=/usr --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization') \
-		# \
-		# # # PHP 7.0
-		# $(test "$phpVersionId" = "7.0" && echo '--with-openssl --with-mcrypt --enable-zip --with-gd --enable-gd-native-ttf --with-libxml-dir=/usr --with-webp-dir=/usr/local --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization') \
-		# \
-		# # # PHP 7.1
-		# $(test "$phpVersionId" = "7.1" && echo '--with-openssl --with-mcrypt --enable-zip --with-gd --enable-gd-native-ttf --with-libxml-dir=/usr --with-webp-dir=/usr/local --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization') \
-		# \
-		# # # PHP 7.2
-		# $(test "$phpVersionId" = "7.2" && echo '--enable-maintainer-zts --with-openssl --with-sodium=/usr/local --enable-zip --with-gd --with-libxml-dir=/usr --with-webp-dir=/usr/local --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization --with-password-argon2') \
-		# \
-		# # # PHP 7.3
-		# $(test "$phpVersionId" = "7.3" && echo '--enable-maintainer-zts --with-openssl=/usr/local/openssl --with-sodium=/usr/local --enable-zip --with-gd --with-libxml-dir=/usr --with-webp-dir=/usr/local --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization --with-password-argon2') \
-		# \
-		# # PHP 7.4
-		# $(test "$phpVersionId" = "7.4" && echo '--enable-maintainer-zts --with-openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-iconv-dir --enable-inline-optimization --with-password-argon2') \
-		# \
-		# # PHP 8.0
-		# $(test "$phpVersionId" = "8.0" && echo '--enable-zts --with-openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-iconv --with-password-argon2') \
-		# \
+		# 小于php 5.6 (5.3 ~5.6)
+		$(test "$phpVersionId" = "5.6" && echo '--with-mysql=mysqlnd') \
+		\
+		# 大于等于php 7.0
+		$(test "$phpVersionId" = "7.0" && echo '--enable-mysqlnd --enable-intl') \
+		\
+		# PHP 5.6
+		$(test "$phpVersionId" = "5.6" && echo '--with-openssl --with-mcrypt --enable-zip --with-gd --enable-gd-native-ttf --with-libxml-dir=/usr --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization') \
+		\
+		# # PHP 7.0
+		$(test "$phpVersionId" = "7.0" && echo '--with-openssl --with-mcrypt --enable-zip --with-gd --enable-gd-native-ttf --with-libxml-dir=/usr --with-webp-dir=/usr/local --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization') \
+		\
+		# # PHP 7.1
+		$(test "$phpVersionId" = "7.1" && echo '--with-openssl --with-mcrypt --enable-zip --with-gd --enable-gd-native-ttf --with-libxml-dir=/usr --with-webp-dir=/usr/local --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization') \
+		\
+		# # PHP 7.2
+		$(test "$phpVersionId" = "7.2" && echo '--with-openssl --with-sodium=/usr/local --enable-zip --with-gd --with-libxml-dir=/usr --with-webp-dir=/usr/local --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization --with-password-argon2') \
+		\
+		# # PHP 7.3
+		$(test "$phpVersionId" = "7.3" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --enable-zip --with-gd --with-libxml-dir=/usr --with-webp-dir=/usr/local --with-freetype-dir=/usr/local/freetype --with-jpeg-dir --with-png-dir --with-iconv-dir --enable-inline-optimization --with-password-argon2') \
+		\
+		# PHP 7.4
+		$(test "$phpVersionId" = "7.4" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-pear --with-iconv-dir --enable-inline-optimization --with-password-argon2') \
+		\
+		# PHP 8.0
+		$(test "$phpVersionId" = "8.0" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-pear --with-iconv --with-password-argon2') \
+		\
 		# PHP 8.1
-		$(test "$phpVersionId" = "8.1" && echo '--enable-zts --with-openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-iconv --with-password-argon2 --with-avif') \
+		$(test "$phpVersionId" = "8.1" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-pear --with-iconv --with-password-argon2 --with-avif') \
 		\
 		# PHP 8.2
-		$(test "$phpVersionId" = "8.2" && echo '--enable-zts --with-openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-iconv --with-password-argon2 --with-avif') \
+		$(test "$phpVersionId" = "8.2" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-pear --with-iconv --with-password-argon2 --with-avif') \
 		\
 		# PHP 8.3
-		$(test "$phpVersionId" = "8.3" && echo '--enable-zts --with-openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-iconv --with-password-argon2 --with-avif') \
+		$(test "$phpVersionId" = "8.3" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-pear --with-iconv --with-password-argon2 --with-avif') \
 		\
 		--enable-option-checking=fatal \
 		--enable-mbstring \
 		--enable-ftp \
 		--with-mysqli=mysqlnd --with-pdo-mysql=mysqlnd \
+		# --enable-gd --with-freetype --with-jpeg --with-zlib \
 		--with-zlib \
 		--enable-xml \
 		--enable-bcmath \

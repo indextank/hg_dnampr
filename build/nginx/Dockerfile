@@ -1,125 +1,158 @@
-#
-# NOTE: THIS DOCKERFILE IS GENERATED VIA "update.sh"
-#
-# PLEASE DO NOT EDIT IT DIRECTLY.
-#
+# 使用debian:bookworm-slim作为基础镜像
 FROM debian:bookworm-slim
 
-LABEL maintainer="NGINX Docker Maintainers <docker-maint@nginx.com>"
-
-ARG CHANGE_SOURCE=false
 ARG NGINX_VERSION
+ARG HMNM_VERSION
+ARG CHANGE_SOURCE=false
+ARG OPENSSL_VERSION
+ARG PCRE_VERSION
 
-ENV NJS_VERSION     0.8.4
-ENV NJS_RELEASE     3~bookworm
-ENV PKG_RELEASE     1~bookworm
+ENV TMP_DIR /tmp/extensions
 
-RUN set -x \
-	&& if [ ${CHANGE_SOURCE} = true ]; then \
+# 安装必要的工具和依赖
+RUN apt-get update && \
+    apt-get install -y \
+    build-essential \
+    wget \
+    libpcre3 \
+    libpcre3-dev \
+    zlib1g \
+    zlib1g-dev \
+    libssl-dev
+
+COPY ./src/nginx/ ${TMP_DIR}
+WORKDIR ${TMP_DIR}
+
+ENV RUN_USER nginx
+
+RUN set -eux; \
+	\
+	if [ ${CHANGE_SOURCE} = true ]; then \
 		sed -i 's@deb.debian.org@mirrors.ustc.edu.cn@g' /etc/apt/sources.list.d/debian.sources; \
-	fi \
-# create nginx user/group first, to be consistent throughout docker variants
-    && groupadd --system --gid 101 nginx \
-    && useradd --system --gid nginx --no-create-home --home /nonexistent --comment "nginx user" --shell /bin/false --uid 101 nginx \
-    && apt-get update \
-    && apt-get install --no-install-recommends --no-install-suggests -y gnupg1 ca-certificates \
-    && \
-    mkdir -p /etc/apt/keyrings; \
-    NGINX_GPGKEY=573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62; \
-    NGINX_GPGKEY_PATH=/etc/apt/keyrings/nginx-archive-keyring.gpg; \
-    export GNUPGHOME="$(mktemp -d)"; \
-    found=''; \
-    for server in \
-        hkp://keyserver.ubuntu.com:80 \
-        pgp.mit.edu \
-    ; do \
-        echo "Fetching GPG key $NGINX_GPGKEY from $server"; \
-        gpg1 --keyserver "$server" --keyserver-options timeout=10 --recv-keys "$NGINX_GPGKEY" && found=yes && break; \
-    done; \
-    test -z "$found" && echo >&2 "error: failed to fetch GPG key $NGINX_GPGKEY" && exit 1; \
-    gpg1 --export "$NGINX_GPGKEY" > "$NGINX_GPGKEY_PATH" ; \
-    rm -rf "$GNUPGHOME"; \
-    apt-get remove --purge --auto-remove -y gnupg1 && rm -rf /var/lib/apt/lists/* \
-    && dpkgArch="$(dpkg --print-architecture)" \
-    && nginxPackages=" \
-        nginx=${NGINX_VERSION}-${PKG_RELEASE} \
-        nginx-module-xslt=${NGINX_VERSION}-${PKG_RELEASE} \
-        nginx-module-geoip=${NGINX_VERSION}-${PKG_RELEASE} \
-        nginx-module-image-filter=${NGINX_VERSION}-${PKG_RELEASE} \
-        nginx-module-njs=${NGINX_VERSION}+${NJS_VERSION}-${NJS_RELEASE} \
-    " \
-    && case "$dpkgArch" in \
-        amd64|arm64) \
-# arches officialy built by upstream
-            echo "deb [signed-by=$NGINX_GPGKEY_PATH] https://nginx.org/packages/mainline/debian/ bookworm nginx" >> /etc/apt/sources.list.d/nginx.list \
-            && apt-get update \
-            ;; \
-        *) \
-# we're on an architecture upstream doesn't officially build for
-# let's build binaries from the published source packages
-            echo "deb-src [signed-by=$NGINX_GPGKEY_PATH] https://nginx.org/packages/mainline/debian/ bookworm nginx" >> /etc/apt/sources.list.d/nginx.list \
-            \
-# new directory for storing sources and .deb files
-            && tempDir="$(mktemp -d)" \
-            && chmod 777 "$tempDir" \
-# (777 to ensure APT's "_apt" user can access it too)
-            \
-# save list of currently-installed packages so build dependencies can be cleanly removed later
-            && savedAptMark="$(apt-mark showmanual)" \
-            \
-            && wget https://nginx.org/packages/keys/nginx_signing.key \
-            && cat nginx_signing.key | apt-key add - \
-# build .deb files from upstream's source packages (which are verified by apt-get)
-            && apt-get update \
-            && apt-get build-dep -y $nginxPackages \
-            && ( \
-                cd "$tempDir" \
-                && DEB_BUILD_OPTIONS="nocheck parallel=$(nproc)" \
-                    apt-get source --compile $nginxPackages \
-            ) \
-# we don't remove APT lists here because they get re-downloaded and removed later
-            \
-# reset apt-mark's "manual" list so that "purge --auto-remove" will remove all build dependencies
-# (which is done after we install the built packages so we don't have to redownload any overlapping dependencies)
-            && apt-mark showmanual | xargs apt-mark auto > /dev/null \
-            && { [ -z "$savedAptMark" ] || apt-mark manual $savedAptMark; } \
-            \
-# create a temporary local APT repo to install from (so that dependency resolution can be handled by APT, as it should be)
-            && ls -lAFh "$tempDir" \
-            && ( cd "$tempDir" && dpkg-scanpackages . > Packages ) \
-            && grep '^Package: ' "$tempDir/Packages" \
-            && echo "deb [ trusted=yes ] file://$tempDir ./" > /etc/apt/sources.list.d/temp.list \
-# work around the following APT issue by using "Acquire::GzipIndexes=false" (overriding "/etc/apt/apt.conf.d/docker-gzip-indexes")
-#   Could not open file /var/lib/apt/lists/partial/_tmp_tmp.ODWljpQfkE_._Packages - open (13: Permission denied)
-#   ...
-#   E: Failed to fetch store:/var/lib/apt/lists/partial/_tmp_tmp.ODWljpQfkE_._Packages  Could not open file /var/lib/apt/lists/partial/_tmp_tmp.ODWljpQfkE_._Packages - open (13: Permission denied)
-            && apt-get -o Acquire::GzipIndexes=false update \
-            ;; \
-    esac \
+	fi; \
+	\
+    groupadd --system --gid 101 ${RUN_USER}; \
+    useradd --system --gid ${RUN_USER} --no-create-home --home /nonexistent --comment "nginx user" --shell /bin/false --uid 101 ${RUN_USER}; \
+    apt-get update; \
+    apt-get install --no-install-recommends --no-install-suggests -y gnupg1 ca-certificates vim; \
     \
-    && apt-get install --no-install-recommends --no-install-suggests -y \
-                        $nginxPackages \
-                        gettext-base \
-                        curl \
-    && apt-get remove --purge --auto-remove -y && rm -rf /var/lib/apt/lists/* /etc/apt/sources.list.d/nginx.list \
+    export MC="-j$(nproc)"; \
     \
-# if we have leftovers from building, let's purge them (including extra, unnecessary build deps)
-    && if [ -n "$tempDir" ]; then \
-        apt-get purge -y --auto-remove \
-        && rm -rf "$tempDir" /etc/apt/sources.list.d/temp.list; \
-    fi \
+    cd ${TMP_DIR}; \
+    \
+    if [ ! -f "nginx-${NGINX_VERSION}.tar.gz" ]; then \
+        curl -L "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o nginx-${NGINX_VERSION}.tar.gz; \
+    fi; \
+    \
+    if [ ! -f "openssl-${OPENSSL_VERSION}.tar.gz" ]; then \
+        curl -L "https://openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" -o openssl-${OPENSSL_VERSION}.tar.gz; \
+    fi; \
+    \
+    if [ ! -f "pcre-${PCRE_VERSION}.tar.gz" ]; then \
+        curl -L "https://ftp.exim.org/pub/pcre/pcre-${PCRE_VERSION}.tar.gz" -o pcre-${PCRE_VERSION}.tar.gz; \
+    fi; \
+    \
+    if [ ! -f "headers-more-nginx-module-${HMNM_VERSION}.tar.gz" ]; then \
+        curl -L "https://github.com/openresty/headers-more-nginx-module/archive/v${HMNM_VERSION}.tar.gz" -o headers-more-nginx-module-${HMNM_VERSION}.tar.gz; \
+    fi; \
+    \
+    tar xzf openssl-${OPENSSL_VERSION}.tar.gz; \
+    tar xzf pcre-${PCRE_VERSION}.tar.gz; \
+    tar xzvf nginx-${NGINX_VERSION}.tar.gz; \
+    tar xzf headers-more-nginx-module-${HMNM_VERSION}.tar.gz; \
+    mkdir -p nginx-${NGINX_VERSION}/module > /dev/null; \
+    mv headers-more-nginx-module-${HMNM_VERSION} nginx-${NGINX_VERSION}/module/headers-more-nginx-module; \
+    cd nginx-${NGINX_VERSION}; \
+    \
+# Modify Nginx version
+    sed -i 's@#define NGINX_VERSION.*$@#define NGINX_VERSION      "1.1.2"@' src/core/nginx.h; \
+    sed -i 's@#define NGINX_VER.*NGINX_VERSION$@#define NGINX_VER          "hg_web/" NGINX_VERSION@' src/core/nginx.h; \
+    sed -i 's@Server: nginx@Server: hg_web@' src/http/ngx_http_header_filter_module.c; \
+    \
+    ./configure --prefix=/etc/nginx \
+                --user=${RUN_USER} \
+                --group=${RUN_USER} \
+                --with-http_stub_status_module \
+                --with-http_sub_module \
+                --with-http_v2_module \
+                --with-http_ssl_module \
+                --with-stream \
+                --with-stream_ssl_preread_module \
+                --with-stream_ssl_module \
+                --with-http_gzip_static_module \
+                --with-http_realip_module \
+                --with-http_flv_module \
+                --with-http_mp4_module \
+                --with-openssl=../openssl-${OPENSSL_VERSION} \
+                --with-pcre=../pcre-${PCRE_VERSION} \
+                --with-pcre-jit \
+                --add-module=module/headers-more-nginx-module; \
+    make ${MC}; \
+    make install; \
+    \
+    [ -z "`grep ^'export PATH=' /etc/profile`" ] && echo "export PATH=/etc/nginx/sbin:\$PATH" >> /etc/profile; \
+    [ -n "`grep ^'export PATH=' /etc/profile`" -a -z "`grep /etc/nginx /etc/profile`" ] && sed -i "s@^export PATH=\(.*\)@export PATH=/etc/nginx/sbin:\1@" /etc/profile; \
+    . /etc/profile; \
+    \
+    mkdir -p /etc/nginx/conf/vhost; \
+    ln -sf /etc/nginx/conf/vhost /etc/nginx/conf.d; \
 # forward request and error logs to docker log collector
-    && ln -sf /dev/stdout /var/log/nginx/access.log \
-    && ln -sf /dev/stderr /var/log/nginx/error.log \
+    # ln -sf /dev/stdout /var/log/nginx/access.log; \
+    # ln -sf /dev/stderr /var/log/nginx/error.log; \
 # create a docker-entrypoint.d directory
-    && mkdir /docker-entrypoint.d
+    mkdir /docker-entrypoint.d; \
+    \
+    apt-mark auto '.*' > /dev/null; \
+	apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
+    \
+    rm -rf ${TMP_DIR}/*
+
+RUN { \
+    echo 'proxy_connect_timeout 300s;'; \
+    echo 'proxy_send_timeout 900;'; \
+    echo 'proxy_read_timeout 900;'; \
+    echo 'proxy_buffer_size 32k;'; \
+    echo 'proxy_buffers 4 64k;'; \
+    echo 'proxy_busy_buffers_size 128k;'; \
+    echo 'proxy_redirect off;'; \
+    echo 'proxy_hide_header Vary;'; \
+    echo "proxy_set_header Accept-Encoding '';"; \
+    echo 'proxy_set_header Referer $http_referer;'; \
+    echo 'proxy_set_header Cookie $http_cookie;'; \
+    echo 'proxy_set_header Host $host;'; \
+    echo 'proxy_set_header X-Real-IP $remote_addr;'; \
+    echo 'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;'; \
+    echo 'proxy_set_header X-Forwarded-Proto $scheme;'; \
+} | tee "/etc/nginx/conf/proxy.conf"
+
+RUN { \
+    echo '/var/log/nginx/*nginx.log {'; \
+    echo '  daily'; \
+    echo '  rotate 5'; \
+    echo '  missingok'; \
+    echo '  dateext'; \
+    echo '  compress'; \
+    echo '  notifempty'; \
+    echo '  sharedscripts'; \
+    echo '  postrotate'; \
+    echo '  [ -e /var/run/nginx.pid ] && kill -USR1 \`cat /var/run/nginx.pid\`'; \
+    echo '  endscript'; \
+} | tee "/etc/logrotate.d/nginx" \
+&& ldconfig
+
+ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/etc/nginx/sbin/"
+
+COPY ./conf/nginx/nginx.conf /etc/nginx/conf/
+COPY ./vhost/nginx_vhost/certs/* /etc/nginx/conf/ssl/
 
 COPY ./build/nginx/docker-entrypoint.sh /
-COPY ./build/nginx/10-listen-on-ipv6-by-default.sh /docker-entrypoint.d
+# COPY ./build/nginx/10-listen-on-ipv6-by-default.sh /docker-entrypoint.d
 COPY ./build/nginx/15-local-resolvers.envsh /docker-entrypoint.d
 COPY ./build/nginx/20-envsubst-on-templates.sh /docker-entrypoint.d
 COPY ./build/nginx/30-tune-worker-processes.sh /docker-entrypoint.d
 ENTRYPOINT ["/docker-entrypoint.sh"]
+
+WORKDIR /var/www/html
 
 EXPOSE 80
 

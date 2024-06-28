@@ -6,7 +6,7 @@ x-common-variables:
   env_file: ./.env
   dns:
     - ${DNS:-223.5.5.5}
-    - ${DNS:-8.8.8.8}
+    - ${DNS:-8.8.4.4}
 
 services:
 
@@ -18,10 +18,11 @@ services:
       context: ./
       dockerfile: ./build/nginx/Dockerfile
       args:
-        - ALPINE_REPOSITORIES=${ALPINE_REPOSITORIES}
         - CHANGE_SOURCE=${CHANGE_SOURCE}
         - NGINX_VERSION=${NGINX_VERSION}
+        - OPENSSL_VERSION=${OPENSSL_VERSION}
         - HMNM_VERSION=${HEADERS_MORE_NGINX_MODULE_VERSION}
+        - PCRE_VERSION=${PCRE_VERSION}
         - http_proxy
         - https_proxy
         - no_proxy
@@ -31,18 +32,18 @@ services:
     privileged: true
     volumes:
       - ${GLOBAL_WEB_PATH}:/var/www/html/:rw
-      - ${NGINX_VHOST_DIR}:/etc/nginx/conf.d/:rw
-      - ${NGINX_CONF_FILE}:/etc/nginx/nginx.conf:ro
+      - ${NGINX_VHOST_DIR}:/etc/nginx/conf/vhost/:rw
+      - ${NGINX_CONF_FILE}:/etc/nginx/conf/nginx.conf:ro
       - ${NGINX_LOG_DIR}:/var/log/nginx/:rw
     environment:
       - SET_CONTAINER_TIMEZONE=true
       - CONTAINER_TIMEZONE=${TZ}
-    depends_on:
+    # depends_on:
       # - php83_apache
-      - php82_apache
+      # - php82_apache
       # - php81_apache
       # - php80_apache
-      - php74_apache
+      # - php74_apache
       # - php72_apache
     networks:
       - default
@@ -76,12 +77,12 @@ services:
       - SET_CONTAINER_TIMEZONE=true
       - CONTAINER_TIMEZONE=${TZ}
     restart: always
-    depends_on:
+    # depends_on:
     #   # - php83_apache
-      - php82_apache
+      # - php82_apache
     #   # - php81_apache
     #   # - php80_apache
-      - php74_apache
+      # - php74_apache
     #   # - php72_apache
     networks:
       - default

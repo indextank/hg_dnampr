@@ -145,7 +145,12 @@ services:
   mongo-server:
     << : *default-common
     container_name: mongo
-    image: mongo:${MONGODB_VERSION}
+    build:
+      context: ./
+      dockerfile: ./build/mongo/Dockerfile
+      args:
+        MONGO_VERSION: ${MONGO_VERSION}
+        CHANGE_SOURCE: ${CHANGE_SOURCE}
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
@@ -164,8 +169,30 @@ services:
       - default
     command:
       --auth
+  # mongo-server:
+  #   << : *default-common
+  #   container_name: mongo
+  #   image: mongo:${MONGODB_VERSION}
+  #   environment:
+  #     MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+  #     MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+  #   ports:
+  #     - "${MONGO_HOST_PORT}:27017"
+  #   volumes:
+  #     - ${MONGO_DATA_DB_DIR}:/data/db:rw
+  #   deploy:
+  #     resources:
+  #       limits:
+  #          cpus: ${MONGO_LIMITS_CPU}
+  #          memory: ${MONGO_LIMITS_MEMORY}
+  #       reservations:
+  #          memory: ${MONGO_RESERVATIONS_MEMORY}
+  #   networks:
+  #     - default
+  #   command:
+  #     --auth
 
-################   postgres  ########################
+#################   postgres  ########################
   postgres-server:
     << : *default-common
     container_name: postgres
