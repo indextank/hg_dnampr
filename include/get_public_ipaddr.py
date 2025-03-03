@@ -21,7 +21,7 @@ class Get_public_ip:
     opener = request.urlopen(url)
     if url == opener.geturl():
       str = opener.read().decode('utf-8')
-    return re.search('\d+\.\d+\.\d+\.\d+',str).group(0)
+    return re.search(r'\d+\.\d+\.\d+\.\d+',str).group(0)
 
 if __name__ == "__main__":
   getmyip = Get_public_ip()
