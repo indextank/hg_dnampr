@@ -1,0 +1,391 @@
+# ========================
+# 开发环境专用配置说明
+# ========================
+# 特性：
+# 1. 单副本运行，最小资源分配
+# 2. 调试工具集成（Xdebug等）
+# 3. 详细日志记录
+# 4. 本地代码热重载
+# 5. 快速迭代配置
+
+services:
+  nginx:
+    extends:
+      file: compose_web.yaml
+      service: nginx-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${NGINX_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${NGINX_DEV_RESERVATIONS_MEMORY:-64M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  tengine:
+    extends:
+      file: compose_web.yaml
+      service: tengine-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${TENGINE_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${TENGINE_DEV_RESERVATIONS_MEMORY:-64M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  valkey:
+    extends:
+      file: compose_databases.yaml
+      service: valkey-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${VALKEY_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${VALKEY_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  redis:
+    extends:
+      file: compose_databases.yaml
+      service: redis-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${REDIS_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${REDIS_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  mongo:
+    extends:
+      file: compose_databases.yaml
+      service: mongo-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${MONGO_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${MONGO_DEV_RESERVATIONS_MEMORY:-256M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  mysql:
+    extends:
+      file: compose_databases.yaml
+      service: mysql-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${MYSQL_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${MYSQL_DEV_RESERVATIONS_MEMORY:-256M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  mysql8:
+    extends:
+      file: compose_databases.yaml
+      service: mysql8-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${MYSQL8_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${MYSQL8_DEV_RESERVATIONS_MEMORY:-256M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  db-data-mysql:
+    extends:
+      file: compose_databases.yaml
+      service: db-data-mysql
+    # 通常数据卷容器不需要副本或资源限制，但可以配置日志
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+  postgres:
+    extends:
+      file: compose_databases.yaml
+      service: postgres-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${POSTGRES_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${POSTGRES_DEV_RESERVATIONS_MEMORY:-256M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  pgadmin:
+    extends:
+      file: compose_databases.yaml
+      service: pgadmin-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${PGADMIN_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PGADMIN_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  php84_apache:
+    extends:
+      file: compose_php.yaml
+      service: php84_apache
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  php83_apache:
+    extends:
+      file: compose_php.yaml
+      service: php83_apache
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  php82_apache:
+    extends:
+      file: compose_php.yaml
+      service: php82_apache
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    # 开发环境可以添加 Xdebug 等调试工具的环境变量或配置
+    # environment:
+    #   XDEBUG_MODE: develop,debug
+    #   XDEBUG_CONFIG: client_host=host.docker.internal client_port=9003
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  php81_apache:
+    extends:
+      file: compose_php.yaml
+      service: php81_apache
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  php80_apache:
+    extends:
+      file: compose_php.yaml
+      service: php80_apache
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  php74_apache:
+    extends:
+      file: compose_php.yaml
+      service: php74_apache
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+  php72_apache:
+    extends:
+      file: compose_php.yaml
+      service: php72_apache
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m"  # 建议值：10-50MB
+        max-file: "3"    # 建议值：3-5个文件
+
+# 可以根据需要为其他服务添加开发环境特定的覆盖配置
+volumes:
+  mysql_data:
+    driver: local
+  pgadmin:
+    driver: local
+  php_sessions:
+    driver: local

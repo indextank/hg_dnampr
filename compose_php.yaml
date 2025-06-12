@@ -1,27 +1,191 @@
 version: '3.9'
 
-x-common-variables:
-  &default-common
-  restart: always
+# ==========================================
+# PHP通用配置模板 (优化版)
+# ==========================================
+x-php-common:
+  &php-common
+  restart: unless-stopped  # 更稳定的重启策略
   env_file: ./.env
   dns:
-    - ${DNS:-223.5.5.5}
-    - ${DNS:-8.8.8.8}
+    - ${DNS_PRIMARY:-8.8.4.4}
+    - ${DNS_SECONDARY:-223.5.5.5}
+  # 日志配置优化
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "${LOG_MAX_SIZE:-50m}"
+      max-file: "${LOG_MAX_FILE:-5}"
+      compress: "true"
+  
+  # 优化的健康检查配置
+  healthcheck:
+    test: 
+      - "CMD"
+      - "bash"
+      - "-c"
+      - |
+        # 多重健康检查逻辑
+        set -e
+        # 检查Apache进程
+        pgrep apache2 > /dev/null || exit 1
+        # 检查HTTP响应
+        timeout 5 curl -f http://localhost:88/php-status >/dev/null 2>&1 || exit 1
+        # 检查PHP运行状态
+        timeout 3 php -v >/dev/null 2>&1 || exit 1
+        exit 0
+    interval: 30s
+    timeout: 15s      # 增加超时时间
+    retries: 3
+    start_period: 90s # 增加启动时间，考虑编译缓存加载
+  
+  # 资源配置优化
+  deploy:
+    # 更新配置
+    update_config:
+      parallelism: 1
+      delay: 10s
+      order: start-first
+      failure_action: rollback
+    # 重启策略
+    restart_policy:
+      condition: on-failure
+      delay: 5s
+      max_attempts: 3
+      window: 120s
+    # 资源限制
+    resources:
+      limits:
+        cpus: ${PHP_LIMITS_CPU:-4}        # 增加默认CPU限制
+        memory: ${PHP_LIMITS_MEMORY:-2G}  # 增加默认内存限制
+      reservations:
+        cpus: ${PHP_RESERVATIONS_CPU:-1}    # 增加默认CPU预留
+        memory: ${PHP_RESERVATIONS_MEMORY:-1G} # 增加默认内存预留
+  
+  # 安全配置 (在开发环境中暂时禁用以避免配置冲突)
+  # security_opt:
+  #   - no-new-privileges:true
+  
+  # 限制系统调用 (在主机网络模式下禁用，避免冲突)
+  # sysctls:
+  #   - net.core.somaxconn=1024
+  #   - net.ipv4.ip_local_port_range=10000 65000
+
+# ==========================================
+# 存储卷定义
+# ==========================================
+volumes:
+  php_sessions:
+    driver: local
 
 services:
 
-################  php83 #############################
-  php83_apache:
-    << : *default-common
-    container_name: php83_apache
+  ################  php84 #############################
+  php84_apache:
+    << : *php-common
+    container_name: php84_apache
+    hostname: php84-apache
+    
     build:
       context: ./
       dockerfile: ./build/php/Dockerfile
+      network: host  # 使用主机网络解决DNS问题
       args:
-        SOURCE_LIST: bullseye
+        # 基础配置
+        PHP_VERSION: ${PHP84_VERSION}
+        CHANGE_SOURCE: ${CHANGE_SOURCE}
+        PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
+        
+        # 多架构支持
+        BUILDPLATFORM: linux/amd64
+        TARGETPLATFORM: linux/amd64
+        
+        # 库版本配置
+        LIBWEBP_VERSION: ${LIBWEBP_VERSION}
+        XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
+        SWOOLE_EXT_VERSION: ${SWOOLE_EXT_VERSION}
+        GRPC_EXT_VERSION: ${GRPC_EXT_VERSION}
+        REDIS_EXT_VERSION: ${REDIS_EXT_VERSION}
+        LIBRDKAFKA_VERSION: ${LIBRDKAFKA_VERSION}
+        RDKAFKA_EXT_VERSION: ${RDKAFKA_EXT_VERSION}
+        ZOOKEEPER_VERSION: ${ZOOKEEPER_VERSION}
+        ZOOKEEPER_EXT_VERSION: ${ZOOKEEPER_EXT_VERSION}
+        PROTOBUF_VERSION: ${PROTOBUF_VERSION}
+        PROTOBUF_EXT_VERSION: ${PROTOBUF_EXT_VERSION}
+        MONGODB_EXT_VERSION: ${MONGODB_EXT_VERSION}
+        IMAGICK_EXT_VERSION: ${IMAGICK_EXT_VERSION}
+        IMAGICK_VERSION: ${IMAGICK_VERSION}
+        MEMCACHED_VERSION: ${MEMCACHED_VERSION}
+        OPENSSL_VERSION: ${OPENSSL_VERSION}
+        CURL_VERSION: ${CURL_VERSION}
+        LIBSODIUM_VERSION: ${LIBSODIUM_VERSION}
+        LIBICONV_VERSION: ${LIBICONV_VERSION}
+        FREETYPE_VERSION: ${FREETYPE_VERSION}
+        YAML_EXT_VERSION: ${YAML_EXT_VERSION}
+        
+        # 代理配置
+        http_proxy: ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy: ${no_proxy}
+      
+      # 构建参数优化
+      shm_size: 512m  # 增加共享内存，加速编译
+    
+    # 存储卷配置 (优化版)
+    volumes:
+      # 应用代码 (只读挂载提高安全性)
+      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
+      
+      # 日志目录 (专用卷)
+      - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
+      
+      # 虚拟主机配置
+      - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:ro,Z
+      
+      # PHP配置
+      - ${PHP84_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+      
+      # 缓存卷 (性能优化)
+      - php_sessions:/tmp/php_sessions:rw
+      
+      # 临时文件优化
+      - type: tmpfs
+        target: /tmp/php_upload
+        tmpfs:
+          size: 100m
+    
+    # 端口映射
+    ports:
+      - "8084:88"
+    
+    # 标签配置
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.php84.rule=Host(`php84.${DOMAIN:-localhost}`)"
+      - "traefik.http.services.php84.loadbalancer.server.port=88"
+      - "com.project.environment=${ENVIRONMENT:-development}"
+      - "com.project.version=${VERSION:-latest}"
+
+  ################  php83 #############################
+  php83_apache:
+    << : *php-common
+    container_name: php83_apache
+    hostname: php83-apache
+    
+    build:
+      context: ./
+      dockerfile: ./build/php/Dockerfile
+      network: host  # 使用主机网络解决DNS问题
+      args:
         PHP_VERSION: ${PHP83_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE}
         PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
+        
+        # 多架构支持
+        BUILDPLATFORM: linux/amd64
+        TARGETPLATFORM: linux/amd64
+        
+        # 库版本配置
         LIBWEBP_VERSION: ${LIBWEBP_VERSION}
         XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
         SWOOLE_EXT_VERSION: ${SWOOLE_EXT_VERSION}
@@ -43,28 +207,56 @@ services:
         LIBICONV_VERSION: ${LIBICONV_VERSION}
         FREETYPE_VERSION: ${FREETYPE_VERSION}
         YAML_EXT_VERSION: ${YAML_EXT_VERSION}
+        
+        # 代理配置
+        http_proxy: ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy: ${no_proxy}
+      
+      # 构建缓存优化
+      shm_size: 512m
+    
     volumes:
-      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw
-      - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw
-      - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:rw
-      - ${PHP81_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro
-    cap_add:
-      - SYS_PTRACE
-    networks:
-      - default
+      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
+      - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
+      - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:ro,Z
+      - ${PHP83_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+      - php_sessions:/tmp/php_sessions:rw
+      - type: tmpfs
+        target: /tmp/php_upload
+        tmpfs:
+          size: 100m
+    
+    ports:
+      - "8083:88"
+    
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.php83.rule=Host(`php83.${DOMAIN:-localhost}`)"
+      - "traefik.http.services.php83.loadbalancer.server.port=88"
+      - "com.project.environment=${ENVIRONMENT:-development}"
+      - "com.project.version=${VERSION:-latest}"
 
-################  php82 #############################
+  ################  php82 #############################
   php82_apache:
-    << : *default-common
+    << : *php-common
     container_name: php82_apache
+    hostname: php82-apache
+    
     build:
       context: ./
       dockerfile: ./build/php/Dockerfile
+      network: host  # 使用主机网络解决DNS问题
       args:
-        SOURCE_LIST: bullseye
         PHP_VERSION: ${PHP82_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE}
         PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
+        
+        # 多架构支持
+        BUILDPLATFORM: linux/amd64
+        TARGETPLATFORM: linux/amd64
+        
+        # 库版本配置 (复用相同的模式)
         LIBWEBP_VERSION: ${LIBWEBP_VERSION}
         XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
         SWOOLE_EXT_VERSION: ${SWOOLE_EXT_VERSION}
@@ -86,25 +278,46 @@ services:
         LIBICONV_VERSION: ${LIBICONV_VERSION}
         FREETYPE_VERSION: ${FREETYPE_VERSION}
         YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-    volumes:
-      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw
-      - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw
-      - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:rw
-      - ${PHP81_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro
-    cap_add:
-      - SYS_PTRACE
-    networks:
-      - default
+        
+        # 代理配置
+        http_proxy: ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy: ${no_proxy}
 
-################   php81 ###################################
+      shm_size: 512m
+    
+    volumes:
+      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
+      - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
+      - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:ro,Z
+      - ${PHP82_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+      - php_sessions:/tmp/php_sessions:rw
+      - type: tmpfs
+        target: /tmp/php_upload
+        tmpfs:
+          size: 100m
+    
+    ports:
+      - "8082:88"
+    
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.php82.rule=Host(`php82.${DOMAIN:-localhost}`)"
+      - "traefik.http.services.php82.loadbalancer.server.port=88"
+      - "com.project.environment=${ENVIRONMENT:-development}"
+      - "com.project.version=${VERSION:-latest}"
+
+  ################   php81 (使用Dockerfile2) ###################################
   php81_apache:
-    << : *default-common
+    << : *php-common
     container_name: php81_apache
+    hostname: php81-apache
+    
     build:
       context: ./
-      dockerfile: ./build/php/Dockerfile
+      dockerfile: ./build/php/Dockerfile2  # 保持使用原有的Dockerfile2
+      network: host  # 使用主机网络解决DNS问题
       args:
-        SOURCE_LIST: bullseye
         PHP_VERSION: ${PHP81_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE}
         PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
@@ -129,25 +342,39 @@ services:
         LIBICONV_VERSION: ${LIBICONV_VERSION}
         FREETYPE_VERSION: ${FREETYPE_VERSION}
         YAML_EXT_VERSION: ${YAML_EXT_VERSION}
+        
+        http_proxy: ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy: ${no_proxy}
+    
     volumes:
-      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw
-      - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw
-      - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:rw
-      - ${PHP81_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro
-    cap_add:
-      - SYS_PTRACE
-    networks:
-      - default
+      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
+      - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
+      - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:ro,Z
+      - ${PHP81_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+      - php_sessions:/tmp/php_sessions:rw
+    
+    ports:
+      - "8081:88"
+    
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.php81.rule=Host(`php81.${DOMAIN:-localhost}`)"
+      - "traefik.http.services.php81.loadbalancer.server.port=88"
+      - "com.project.environment=${ENVIRONMENT:-development}"
+      - "com.project.version=${VERSION:-latest}"
 
-################   php80 ############################
+  ################   php80 (使用Dockerfile2) ############################
   php80_apache:
-    << : *default-common
+    << : *php-common
     container_name: php80_apache
+    hostname: php80-apache
+    
     build:
       context: ./
-      dockerfile: ./build/php/Dockerfile2
+      dockerfile: ./build/php/Dockerfile2  # 保持使用原有的Dockerfile2
+      network: host  # 使用主机网络解决DNS问题
       args:
-        SOURCE_LIST: bullseye
         PHP_VERSION: ${PHP80_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE}
         PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
@@ -166,36 +393,50 @@ services:
         IMAGICK_EXT_VERSION: ${IMAGICK_EXT_VERSION}
         IMAGICK_VERSION: ${IMAGICK_VERSION}
         MEMCACHED_VERSION: ${MEMCACHED_VERSION}
-        OPENSSL_VERSION: ${OPENSSL_VERSION}
+        OPENSSL_VERSION: ${OPENSSL_VERSION_11}  # 注意PHP80使用OpenSSL 1.1
         CURL_VERSION: ${CURL_VERSION}
         LIBSODIUM_VERSION: ${LIBSODIUM_VERSION}
         LIBICONV_VERSION: ${LIBICONV_VERSION}
         FREETYPE_VERSION: ${FREETYPE_VERSION}
         YAML_EXT_VERSION: ${YAML_EXT_VERSION}
+        
+        http_proxy: ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy: ${no_proxy}
+    
     volumes:
-      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw
-      - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw
-      - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:rw
-      - ${PHP80_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro
-    cap_add:
-      - SYS_PTRACE
-    networks:
-      - default
+      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
+      - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
+      - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:ro,Z
+      - ${PHP80_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+      - php_sessions:/tmp/php_sessions:rw
+    
+    ports:
+      - "8080:88"
+    
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.php80.rule=Host(`php80.${DOMAIN:-localhost}`)"
+      - "traefik.http.services.php80.loadbalancer.server.port=88"
+      - "com.project.environment=${ENVIRONMENT:-development}"
+      - "com.project.version=${VERSION:-latest}"
 
-################   php74 ##############################
+  ################   php74 (使用Dockerfile2) ##############################
   php74_apache:
-    << : *default-common
+    << : *php-common
     container_name: php74_apache
+    hostname: php74-apache
+    
     build:
       context: ./
-      dockerfile: ./build/php/Dockerfile2
+      dockerfile: ./build/php/Dockerfile2  # 保持使用原有的Dockerfile2
+      network: host  # 使用主机网络解决DNS问题
       args:
-        SOURCE_LIST: bullseye
         PHP_VERSION: ${PHP74_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE}
         PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
         LIBWEBP_VERSION: ${LIBWEBP_VERSION}
-        SWOOLE_EXT_VERSION: ${SWOOLE7_EXT_VERSION}
+        SWOOLE_EXT_VERSION: ${SWOOLE7_EXT_VERSION}  # 注意PHP74使用不同的Swoole版本
         XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
         GRPC_EXT_VERSION: ${GRPC_EXT_VERSION}
         REDIS_EXT_VERSION: ${REDIS_EXT_VERSION}
@@ -209,35 +450,48 @@ services:
         IMAGICK_EXT_VERSION: ${IMAGICK_EXT_VERSION}
         IMAGICK_VERSION: ${IMAGICK_VERSION}
         MEMCACHED_VERSION: ${MEMCACHED_VERSION}
-        OPENSSL_VERSION: ${OPENSSL_VERSION}
+        OPENSSL_VERSION: ${OPENSSL_VERSION_11}  # 注意PHP74使用OpenSSL 1.1
         CURL_VERSION: ${CURL_VERSION}
         LIBSODIUM_VERSION: ${LIBSODIUM_VERSION}
         LIBICONV_VERSION: ${LIBICONV_VERSION}
         FREETYPE_VERSION: ${FREETYPE_VERSION}
         YAML_EXT_VERSION: ${YAML_EXT_VERSION}
+        
+        http_proxy: ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy: ${no_proxy}
+    
     volumes:
-      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw
-      - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw
-      - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:rw
-      - ${PHP74_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro
-    cap_add:
-      - SYS_PTRACE
-    networks:
-      - default
+      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
+      - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
+      - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:ro,Z
+      - ${PHP74_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+      - php_sessions:/tmp/php_sessions:rw
+    
+    ports:
+      - "8074:88"
+    
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.php74.rule=Host(`php74.${DOMAIN:-localhost}`)"
+      - "traefik.http.services.php74.loadbalancer.server.port=88"
+      - "com.project.environment=${ENVIRONMENT:-development}"
+      - "com.project.version=${VERSION:-latest}"
 
-################   php72 ##############################
+  ################   php72 (使用Dockerfile2) ##############################
   php72_apache:
-    << : *default-common
+    << : *php-common
     container_name: php72_apache
+    hostname: php72-apache
+    
     build:
       context: ./
-      dockerfile: ./build/php/Dockerfile2
+      dockerfile: ./build/php/Dockerfile2  # 保持使用原有的Dockerfile2
+      network: host  # 使用主机网络解决DNS问题
       args:
-        SOURCE_LIST: bullseye
         PHP_VERSION: ${PHP72_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE}
         PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-        # MORE_EXTENSION_INSTALLER: php72.sh
         LIBWEBP_VERSION: ${LIBWEBP_VERSION}
         XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
         GRPC_EXT_VERSION: ${GRPC_EXT_VERSION}
@@ -252,18 +506,30 @@ services:
         IMAGICK_EXT_VERSION: ${IMAGICK_EXT_VERSION}
         IMAGICK_VERSION: ${IMAGICK_VERSION}
         MEMCACHED_VERSION: ${MEMCACHED_VERSION}
-        OPENSSL_VERSION: ${OPENSSL_VERSION_11}
+        OPENSSL_VERSION: ${OPENSSL_VERSION_11}  # 注意PHP72使用OpenSSL 1.1
         CURL_VERSION: ${CURL_VERSION}
         LIBSODIUM_VERSION: ${LIBSODIUM_VERSION}
         LIBICONV_VERSION: ${LIBICONV_VERSION}
         FREETYPE_VERSION: ${FREETYPE_VERSION}
         YAML_EXT_VERSION: ${YAML_EXT_VERSION}
+        
+        http_proxy: ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy: ${no_proxy}
+    
     volumes:
-      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw
-      - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw
-      - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:rw
-      - ${PHP72_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro
-    cap_add:
-      - SYS_PTRACE
-    networks:
-      - default
+      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
+      - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
+      - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:ro,Z
+      - ${PHP72_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+      - php_sessions:/tmp/php_sessions:rw
+    
+    ports:
+      - "8072:88"
+    
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.php72.rule=Host(`php72.${DOMAIN:-localhost}`)"
+      - "traefik.http.services.php72.loadbalancer.server.port=88"
+      - "com.project.environment=${ENVIRONMENT:-development}"
+      - "com.project.version=${VERSION:-latest}"

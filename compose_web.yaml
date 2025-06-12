@@ -5,8 +5,8 @@ x-common-variables:
   restart: always
   env_file: ./.env
   dns:
-    - ${DNS:-223.5.5.5}
     - ${DNS:-8.8.4.4}
+    - ${DNS:-223.5.5.5}
 
 services:
 
@@ -23,9 +23,9 @@ services:
         - OPENSSL_VERSION=${OPENSSL_VERSION}
         - HMNM_VERSION=${HEADERS_MORE_NGINX_MODULE_VERSION}
         - PCRE_VERSION=${PCRE_VERSION}
-        - http_proxy
-        - https_proxy
-        - no_proxy
+        - http_proxy=${http_proxy:-}
+        - https_proxy=${https_proxy:-}
+        - no_proxy=${no_proxy:-}
     ports:
       - "${NGINX_HTTP_HOST_PORT}:80"
       - "${NGINX_HTTPS_HOST_PORT}:443"
@@ -38,13 +38,27 @@ services:
     environment:
       - SET_CONTAINER_TIMEZONE=true
       - CONTAINER_TIMEZONE=${TZ}
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost/nginx_status"] # 或者针对Tengine使用 appropriate Tengine status endpoint
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: ${NGINX_LIMITS_CPU:-0.5} # 默认0.5 CPU核心
+          memory: ${NGINX_LIMITS_MEMORY:-256M} # 默认256MB内存
+        reservations:
+          cpus: ${NGINX_RESERVATIONS_CPU:-0.25} # 默认预留0.25 CPU核心
+          memory: ${NGINX_RESERVATIONS_MEMORY:-128M} # 默认预留128MB内存
     # depends_on:
-      # - php83_apache
-      # - php82_apache
-      # - php81_apache
-      # - php80_apache
-      # - php74_apache
-      # - php72_apache
+    #   php74_apache:
+    #     condition: service_healthy
+    #   php82_apache:
+    #     condition: service_healthy
+    #   php84_apache:
+    #     condition: service_healthy
     networks:
       - default
 
@@ -61,9 +75,9 @@ services:
         - CHANGE_SOURCE=${CHANGE_SOURCE}
         - TENGINE_VERSION=${TENGINE_VERSION}
         - HMNM_VERSION=${HEADERS_MORE_NGINX_MODULE_VERSION}
-        - http_proxy
-        - https_proxy
-        - no_proxy
+        - http_proxy=${http_proxy:-}
+        - https_proxy=${https_proxy:-}
+        - no_proxy=${no_proxy:-}
     ports:
       - "${NGINX_HTTP_HOST_PORT}:80"
       - "${NGINX_HTTPS_HOST_PORT}:443"
@@ -76,13 +90,27 @@ services:
     environment:
       - SET_CONTAINER_TIMEZONE=true
       - CONTAINER_TIMEZONE=${TZ}
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost/nginx_status"] # Tengine也通常有类似的status模块
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: ${TENGINE_LIMITS_CPU:-0.5}
+          memory: ${TENGINE_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${TENGINE_RESERVATIONS_CPU:-0.25}
+          memory: ${TENGINE_RESERVATIONS_MEMORY:-128M}
     restart: always
     # depends_on:
-    #   # - php83_apache
-      # - php82_apache
-    #   # - php81_apache
-    #   # - php80_apache
-      # - php74_apache
-    #   # - php72_apache
+    #   php74_apache:
+    #     condition: service_healthy
+    #   php82_apache:
+    #     condition: service_healthy
+    #   php84_apache:
+    #     condition: service_healthy
     networks:
       - default

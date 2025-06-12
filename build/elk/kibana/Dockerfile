@@ -8,7 +8,7 @@ FROM debian:bullseye-slim AS builder
 ARG CHANGE_SOURCE=false
 ARG ELK_VERSION
 
-ENV TMP_DIR /tmp/extensions
+ENV TMP_DIR=/tmp/extensions
 
 RUN set -eux; \
   \
@@ -58,7 +58,7 @@ ARG CHANGE_SOURCE=false
 ARG ELK_VERSION
 ARG TINI_VERSION
 
-ENV TMP_DIR /tmp/extensions
+ENV TMP_DIR=/tmp/extensions
 
 EXPOSE 5601
 
@@ -122,7 +122,7 @@ COPY --from=builder --chown=1000:0 /usr/share/kibana /usr/share/kibana
 WORKDIR /usr/share/kibana
 # RUN ln -s /usr/share/kibana /opt/kibana
 
-ENV ELASTIC_CONTAINER true
+ENV ELASTIC_CONTAINER=true
 ENV PATH=/usr/share/kibana/bin:$PATH
 
 # Set some Kibana configuration defaults.
@@ -131,6 +131,9 @@ COPY --chown=1000:0 ./conf/kibana/kibana.yml /usr/share/kibana/config/kibana.yml
 # Add the launcher/wrapper script. It knows how to interpret environment
 # variables and translate them to Kibana CLI options.
 COPY ./build/elk/kibana/kibana-docker /usr/local/bin/
+
+# Set execute permissions for the kibana-docker script
+RUN chmod 0755 /usr/local/bin/kibana-docker
 
 # Ensure gid 0 write permissions for OpenShift.
 RUN chmod g+ws /usr/share/kibana && \

@@ -1,0 +1,7 @@
+.git
+.idea
+*.log
+logs/
+tmp/
+node_modules/
+# Add other files/directories to ignore

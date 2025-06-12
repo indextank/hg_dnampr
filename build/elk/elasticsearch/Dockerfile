@@ -10,7 +10,7 @@ ARG CHANGE_SOURCE=false
 ARG ELK_VERSION
 ARG TINI_VERSION
 
-ENV TMP_DIR /tmp/extensions
+ENV TMP_DIR=/tmp/extensions
 
 RUN set -eux; \
 	\
@@ -87,9 +87,9 @@ RUN set -eux ; \
     mkdir data; \
     mv config/log4j2.properties config/log4j2.file.properties; \
     mv config/log4j2.docker.properties config/log4j2.properties; \
-    find . -type d -exec chmod 0555 {} +; \
-    find . -type f -exec chmod 0444 {} +; \
-    chmod 0555 bin/* jdk/bin/* jdk/lib/jspawnhelper modules/x-pack-ml/platform/linux-*/bin/*; \
+    find . -type d -exec chmod 0755 {} +; \
+    find . -type f -exec chmod 0644 {} +; \
+    chmod 0755 bin/* jdk/bin/* jdk/lib/jspawnhelper modules/x-pack-ml/platform/linux-*/bin/*; \
     chmod 0775 bin config config/jvm.options.d data logs plugins; \
     find config -type f -exec chmod 0664 {} +
 
@@ -130,14 +130,14 @@ RUN set -eux; \
     adduser elasticsearch root; \
     chown -R 0:0 /usr/share/elasticsearch
 
-ENV ELASTIC_CONTAINER true
+ENV ELASTIC_CONTAINER=true
 
 WORKDIR /usr/share/elasticsearch
 
 COPY --from=builder --chown=0:0 /usr/share/elasticsearch /usr/share/elasticsearch
 COPY --from=builder --chown=0:0 /bin/tini /bin/tini
 
-ENV PATH /usr/share/elasticsearch/bin:$PATH
+ENV PATH=/usr/share/elasticsearch/bin:$PATH
 
 COPY ./build/elk/elasticsearch/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
@@ -163,111 +163,111 @@ RUN chmod g=u /etc/passwd && \
 COPY ./build/elk/elasticsearch/docker-openjdk /etc/ca-certificates/update.d/docker-openjdk
 RUN /etc/ca-certificates/update.d/docker-openjdk
 
-RUN if [ -z "${PLUGINS##*,amazon-ec2,*}" ]; then \
+RUN if [[ "${PLUGINS}" == *",amazon-ec2,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install amazon-ec2; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,analysis-icu,*}" ]; then \
+    if [[ "${PLUGINS}" == *",analysis-icu,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install analysis-icu; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,analysis-kuromoji,*}" ]; then \
+    if [[ "${PLUGINS}" == *",analysis-kuromoji,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install analysis-kuromoji; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,analysis-nori,*}" ]; then \
+    if [[ "${PLUGINS}" == *",analysis-nori,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install analysis-nori; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,analysis-phonetic,*}" ]; then \
+    if [[ "${PLUGINS}" == *",analysis-phonetic,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install analysis-phonetic; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,analysis-smartcn,*}" ]; then \
+    if [[ "${PLUGINS}" == *",analysis-smartcn,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install analysis-smartcn; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,analysis-stempel,*}" ]; then \
+    if [[ "${PLUGINS}" == *",analysis-stempel,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install analysis-stempel; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,analysis-ukrainian,*}" ]; then \
+    if [[ "${PLUGINS}" == *",analysis-ukrainian,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install analysis-ukrainian; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,discovery-azure-classic,*}" ]; then \
+    if [[ "${PLUGINS}" == *",discovery-azure-classic,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install discovery-azure-classic; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,discovery-ec2,*}" ]; then \
+    if [[ "${PLUGINS}" == *",discovery-ec2,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install discovery-ec2; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,discovery-file,*}" ]; then \
+    if [[ "${PLUGINS}" == *",discovery-file,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install discovery-file; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,discovery-gce,*}" ]; then \
+    if [[ "${PLUGINS}" == *",discovery-gce,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install discovery-gce; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,google-cloud-storage,*}" ]; then \
+    if [[ "${PLUGINS}" == *",google-cloud-storage,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install google-cloud-storage; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,ingest-attachment,*}" ]; then \
+    if [[ "${PLUGINS}" == *",ingest-attachment,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install ingest-attachment; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,ingest-geoip,*}" ]; then \
+    if [[ "${PLUGINS}" == *",ingest-geoip,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install ingest-geoip; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,ingest-user-agent,*}" ]; then \
+    if [[ "${PLUGINS}" == *",ingest-user-agent,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install ingest-user-agent; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,mapper-murmur3,*}" ]; then \
+    if [[ "${PLUGINS}" == *",mapper-murmur3,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install mapper-murmur3; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,mapper-size,*}" ]; then \
+    if [[ "${PLUGINS}" == *",mapper-size,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install mapper-size; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,microsoft-azure-storage,*}" ]; then \
+    if [[ "${PLUGINS}" == *",microsoft-azure-storage,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install microsoft-azure-storage; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,qa,*}" ]; then \
+    if [[ "${PLUGINS}" == *",qa,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install qa; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,repository-azure,*}" ]; then \
+    if [[ "${PLUGINS}" == *",repository-azure,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install repository-azure; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,repository-gcs,*}" ]; then \
+    if [[ "${PLUGINS}" == *",repository-gcs,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install repository-gcs; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,repository-hdfs,*}" ]; then \
+    if [[ "${PLUGINS}" == *",repository-hdfs,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install repository-hdfs; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,repository-s3,*}" ]; then \
+    if [[ "${PLUGINS}" == *",repository-s3,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install repository-s3; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,store-smb,*}" ]; then \
+    if [[ "${PLUGINS}" == *",store-smb,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install store-smb; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,analysis-ik,*}" ]; then \
+    if [[ "${PLUGINS}" == *",analysis-ik,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install https://github.com/medcl/elasticsearch-analysis-ik/releases/download/v${ELK_VERSION}/elasticsearch-analysis-ik-${ELK_VERSION}.zip; \
     fi \
     && \
-    if [ -z "${PLUGINS##*,analysis-pinyin,*}" ]; then \
+    if [[ "${PLUGINS}" == *",analysis-pinyin,"* ]]; then \
       printf "y\n" | elasticsearch-plugin install https://github.com/medcl/elasticsearch-analysis-pinyin/releases/download/v${ELK_VERSION}/elasticsearch-analysis-pinyin-${ELK_VERSION}.zip; \
     fi
 
@@ -298,6 +298,20 @@ EXPOSE 9200 9300
 ENTRYPOINT ["/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
 # Dummy overridable parameter parsed by entrypoint
 CMD ["eswrapper"]
+
+# 在最终阶段添加更完整的权限设置
+RUN set -eux; \
+    mkdir -p /usr/share/elasticsearch/logs; \
+    chmod 0777 /usr/share/elasticsearch/logs; \
+    chown -R elasticsearch:root /usr/share/elasticsearch/logs; \
+    chmod -R 0777 /usr/share/elasticsearch/logs; \
+    chown -R elasticsearch:root /usr/share/elasticsearch/data; \
+    chmod -R 0777 /usr/share/elasticsearch/data; \
+    chown -R elasticsearch:root /usr/share/elasticsearch/config; \
+    chmod -R 0777 /usr/share/elasticsearch/config; \
+    mkdir -p /usr/share/elasticsearch/config/certs; \
+    chmod -R 0777 /usr/share/elasticsearch/config/certs; \
+    chown -R elasticsearch:root /usr/share/elasticsearch/config/certs
 
 USER 1000:0
 

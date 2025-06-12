@@ -10,7 +10,7 @@ ARG PG_VERSION
 ARG ALPINE_REPOSITORIES
 ARG CHANGE_SOURCE=false
 
-ENV TMP_DIR /tmp/extensions
+ENV TMP_DIR=/tmp/extensions
 
 # If you're in China, or you need to change sources, will be set CHANGE_SOURCE to true in .env.
 RUN set -eux; \
@@ -38,15 +38,15 @@ RUN set -eux; \
 
 # make the "en_US.UTF-8" locale so postgres will be utf-8 enabled by default
 # alpine doesn't require explicit locale-file generation
-ENV LANG en_US.utf8
+ENV LANG=en_US.utf8
 
 RUN mkdir /docker-entrypoint-initdb.d
 
-ENV PG_MAJOR 16
+ENV PG_MAJOR=16
 
 # ENV PG_SHA256 446e88294dbc2c9085ab4b7061a646fa604b4bec03521d5ea671c2e5ad9b2952
 
-ENV DOCKER_PG_LLVM_DEPS \
+ENV DOCKER_PG_LLVM_DEPS=\
 		llvm15-dev \
 		clang15
 
@@ -196,7 +196,7 @@ RUN set -eux; \
 
 RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 3777 /var/run/postgresql
 
-ENV PGDATA /var/lib/postgresql/data
+ENV PGDATA=/var/lib/postgresql/data
 # this 1777 will be replaced by 0700 at runtime (allows semi-arbitrary "--user" values)
 RUN mkdir -p "$PGDATA" && chown -R postgres:postgres "$PGDATA" && chmod 1777 "$PGDATA"
 VOLUME /var/lib/postgresql/data

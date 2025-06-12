@@ -154,7 +154,6 @@ kibana_vars=(
     server.host
     server.keepAliveTimeout
     server.maxPayload
-    server.maxPayloadBytes
     server.name
     server.port
     server.publicBaseUrl

@@ -1,39 +1,50 @@
-cluster.name: docker-cluster
-network.host: 0.0.0.0
+# Elasticsearch 单机配置文件
+# 优化后的最小化配置
 
-discovery.type: single-node
+# 集群设置
+cluster.name: "docker-cluster"
+node.name: "elasticsearch"
 
-# minimum_master_nodes need to be explicitly set when bound on a public IP
-# set to 1 to allow single node clusters
-# Details: https://github.com/elastic/elasticsearch/pull/17288
-# discovery.zen.minimum_master_nodes: 1
+# 单节点发现模式（重要：避免集群相关问题）
+discovery.type: "single-node"
 
-# ----------------------------------- Memory -----------------------------------
+# 网络设置
+network.host: "0.0.0.0"
+http.port: 9200
+
+# 跨域访问设置
 http.cors.enabled: true
 http.cors.allow-origin: "*"
-http.cors.allow-headers: Authorization
+http.cors.allow-headers: "Authorization,X-Requested-With,Content-Length,Content-Type"
 
-# 生产必须为true，内存锁定检查，目的是内存地址直接映射，减少一次copy时间
+# X-Pack 设置（更新为 8.x 版本支持的配置）
+xpack.security.enabled: false
+xpack.profiling.enabled: false
+xpack.monitoring.templates.enabled: false
+
+# 插件相关设置
+plugin.mandatory: []
+
+# 索引设置
+action.auto_create_index: true
+action.destructive_requires_name: false
+
+# 日志级别设置（减少不必要的警告）
+logger.level: "WARN"
+# 特别设置AWS相关日志级别为ERROR，减少警告信息
+logger.com.amazonaws: "ERROR"
+logger.org.elasticsearch.repositories.s3: "ERROR"
+
+# 内存锁定（通过ulimits设置）
 bootstrap.memory_lock: false
 
-## X-Pack settings
-## see https://www.elastic.co/guide/en/elasticsearch/reference/current/security-settings.html
-#
-# xpack.license.self_generated.type: trial
-xpack.security.enabled: true
-# xpack.security.transport.ssl.enabled: false
-# xpack.security.http.ssl.enabled: false
-# xpack.security.enrollment.enabled: true
+# 线程池设置（单机优化）
+thread_pool.write.queue_size: 200
+thread_pool.search.queue_size: 500
 
-action.auto_create_index: .security,.monitoring*,.watches,.triggered_watches,.watcher-history*
+# 性能优化设置
+indices.memory.index_buffer_size: "10%"
+indices.memory.min_index_buffer_size: "48mb"
 
-indices.fielddata.cache.size:  80%
-indices.breaker.fielddata.limit: 60%
-
-# Allow HTTP API connections from localhost and local networks
-# Connections are encrypted and require user authentication
-http.host: [_local_, _site_]
-
-# Allow other nodes to join the cluster from localhost and local networks
-# Connections are encrypted and mutually authenticated
-transport.host: [_local_, _site_]
+# 禁用不必要的功能来提升性能
+# bootstrap.system_call_filter: false

@@ -2,15 +2,55 @@
 # ** THIS IS AN AUTO-GENERATED FILE **
 #
 
-# Default Kibana configuration for docker target
-server.host: "0.0.0.0"
-server.shutdownTimeout: "5s"
-# elasticsearch.hosts: [ "http://elasticsearch:9200" ]
-monitoring.ui.container.elasticsearch.enabled: true
+# Kibana 优化配置文件
+# 针对内存使用和性能进行优化
 
+# 服务器配置
+server.host: "0.0.0.0"
+server.port: 5601
+server.shutdownTimeout: "5s"
+server.maxPayload: 1048576
+
+# Elasticsearch 连接
+elasticsearch.hosts: ["http://elasticsearch:9200"]
+elasticsearch.pingTimeout: 1500
+elasticsearch.requestTimeout: 30000
+
+# 禁用监控功能（减少内存使用）
+monitoring.ui.container.elasticsearch.enabled: false
+monitoring.enabled: false
+monitoring.kibana.collection.enabled: false
+
+# 禁用报告功能
+xpack.reporting.enabled: false
 xpack.reporting.roles.enabled: false
+
+# 截图功能优化
 xpack.screenshotting.browser.chromium.disableSandbox: true
 
+# 性能优化
+telemetry.enabled: false
+telemetry.optIn: false
+newsfeed.enabled: false
+
+# 日志配置
+logging.root.level: warn
+
+# 本地化
+i18n.locale: "zh-CN"
+
+# 加密密钥（保持原有配置）
 xpack.encryptedSavedObjects.encryptionKey: cefc72fa43965033bf376ddbf75aebe1
 xpack.reporting.encryptionKey: fe42edf0aae5a823e0e16c300a85ac86
 xpack.security.encryptionKey: eaf5b398085be7ea83afe3d5353a112c
+
+# 禁用遥测数据收集
+telemetry.allowChangingOptInStatus: false
+
+# 优化保存对象
+savedObjects.maxImportPayloadBytes: 10485760
+
+# 禁用 Fleet 和 APM 功能（开发环境不需要）
+xpack.fleet.enabled: false
+xpack.apm.enabled: false
+xpack.uptime.enabled: false

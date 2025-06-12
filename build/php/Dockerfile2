@@ -1,6 +1,9 @@
 FROM debian:bullseye-slim
 
-ARG SOURCE_LIST
+# 代理设置参数
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
 
 ARG PHP_VERSION
 ARG PHP_SUFFIX
@@ -39,15 +42,15 @@ RUN set -eux; \
 	} > /etc/apt/preferences.d/no-debian-php
 
 ENV MC="-j$(nproc)"
-ENV TMP_DIR /tmp/extensions
-ENV APACHE_CONFDIR /etc/apache2
-ENV APACHE_LOG_DIR $APACHE_CONFDIR/logs
-ENV APACHE_ENVVARS $APACHE_CONFDIR/envvars
-ENV APACHE_RUN_DIR /var/run/apache2
-ENV APACHE_PID_FILE $APACHE_RUN_DIR/apache2.pid
-ENV APACHE_RUN_USER www-data
-ENV APACHE_RUN_GROUP www-data
-ENV PHP_INI_DIR /usr/local/etc/php
+ENV TMP_DIR=/tmp/extensions
+ENV APACHE_CONFDIR=/etc/apache2
+ENV APACHE_LOG_DIR=$APACHE_CONFDIR/logs
+ENV APACHE_ENVVARS=$APACHE_CONFDIR/envvars
+ENV APACHE_RUN_DIR=/var/run/apache2
+ENV APACHE_PID_FILE=$APACHE_RUN_DIR/apache2.pid
+ENV APACHE_RUN_USER=www-data
+ENV APACHE_RUN_GROUP=www-data
+ENV PHP_INI_DIR=/usr/local/etc/php
 
 # dependencies required for running "phpize"
 # persistent / runtime deps
@@ -57,9 +60,6 @@ RUN set -eux; \
 	cp -r /etc/apt/sources.list /etc/apt/sources.list.bak; \
 	rm -rf /var/lib/apt/lists/*; \
 	mkdir -p ${TMP_DIR}
-
-# 此处跟下面的CHANGE_SOURCE逻辑判断替换重复了，备用！
-# COPY ./conf/$SOURCE_LIST /etc/apt/sources.list
 
 RUN set -eux; \
 	if [ ${CHANGE_SOURCE} = true ]; then \
@@ -75,7 +75,7 @@ RUN set -eux; \
 	# apt-get install -y --assume-yes --no-install-recommends apt-transport-https ca-certificates; \
 	# mkdir -p ${TMP_DIR}; \
 	apt-get update; \
-	apt-get install -y --no-install-recommends apache2 gnupg dirmngr curl xz-utils apt-utils libldap-common autoconf dpkg-dev file g++ gcc libc-dev make pkg-config re2c wget cmake automake libtool build-essential libssl-dev libpq-dev; \
+	apt-get install -y --no-install-recommends apache2 git gnupg dirmngr curl xz-utils apt-utils libldap-common autoconf dpkg-dev file g++ gcc libc-dev make pkg-config re2c wget cmake automake libtool build-essential libssl-dev libpq-dev; \
 	rm -rf /var/lib/apt/lists/*; \
 	\
 	sed -ri 's/^export ([^=]+)=(.*)$/: ${\1:=\2}\nexport \1/' "$APACHE_ENVVARS"; \
@@ -397,12 +397,6 @@ RUN set -eux; \
 		# PHP 8.1
 		$(test "$phpVersionId" = "8.1" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-pear --with-iconv --with-password-argon2 --with-avif') \
 		\
-		# PHP 8.2
-		$(test "$phpVersionId" = "8.2" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-pear --with-iconv --with-password-argon2 --with-avif') \
-		\
-		# PHP 8.3
-		$(test "$phpVersionId" = "8.3" && echo '--with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-pear --with-iconv --with-password-argon2 --with-avif') \
-		\
 		--enable-option-checking=fatal \
 		--enable-mbstring \
 		--enable-ftp \
@@ -476,7 +470,42 @@ RUN set -eux; \
 		sed -i "s#ServerSignature On#ServerSignature Off#g" /etc/apache2/conf-available/security.conf; \
 		echo "ProtocolsHonorOrder On" >> /etc/apache2/conf-available/security.conf; \
 		sed -i "s/#AddDefaultCharset UTF-8/AddDefaultCharset UTF-8/g" /etc/apache2/conf-available/charset.conf; \
-		sed -i "s#Listen 80#Listen 88#g" /etc/apache2/ports.conf; \
+		sed -i "s/Listen 80/Listen 88/g" /etc/apache2/ports.conf; \
+		sed -i "s/CustomLog/#CustomLog/g" /etc/apache2/conf-enabled/other-vhosts-access-log.conf; \
+		# 添加PHP状态页面支持
+        echo "<Location /php-status>" > /etc/apache2/conf-available/status.conf && \
+		echo "    SetHandler server-status" >> /etc/apache2/conf-available/status.conf && \
+		echo "    Require local" >> /etc/apache2/conf-available/status.conf && \
+		echo "</Location>" >> /etc/apache2/conf-available/status.conf && \
+		# 启用status模块（如果未启用）和配置
+		a2enmod status || true && \
+		a2enconf status; \
+		\
+		echo "alias ll='ls -latrh --color=auto'" >> ~/.bashrc; \
+		# source ~/.bashrc; \
+		\
+		if [ -f "/usr/bin/git" ]; then \
+			git config --global alias.co checkout; \
+			git config --global alias.br branch; \
+			git config --global alias.ci commit; \
+			git config --global alias.st status; \
+			git config --global alias.last 'log -1 HEAD'; \
+			git config --global alias.logg "log --graph --decorate --all"; \
+			git config --global core.autocrlf "input"; \
+			git config --global http.postBuffer 524288000; \
+			git config --global core.editor /usr/bin/vi; \
+			git config --global http.sslverify false; \
+			git config --global pull.rebase false; \
+			git config --global credential.helper cache; \
+			git config --global http.version HTTP/2; \
+			git config --global --add safe.directory "*"; \
+		fi; \
+		\
+		/usr/local/bin/php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"; \
+		/usr/local/bin/php -r "if (hash_file('sha384', 'composer-setup.php') === 'dac665fdc30fdd8ec78b38b9800061b4150413ff2e3b6f88543c636f7cd84f6db9189d43a81e5503cda447da73c7e5b6') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;"; \
+		/usr/local/bin/php composer-setup.php; \
+		/usr/local/bin/php -r "unlink('composer-setup.php');"; \
+		mv composer.phar /usr/local/bin/composer; \
 		\
 		if [ -f "/usr/local/bin/pecl" ]; then \
 			pecl channel-update pecl.php.net; \

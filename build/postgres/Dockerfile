@@ -1,15 +1,14 @@
-#
-# NOTE: THIS DOCKERFILE IS GENERATED VIA "apply-templates.sh"
-#
-# PLEASE DO NOT EDIT IT DIRECTLY.
-#
-
 FROM debian:bookworm-slim
+
+# 添加代理设置
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
 
 ARG PG_VERSION
 ARG CHANGE_SOURCE=false
 
-ENV TMP_DIR /tmp/extensions
+ENV TMP_DIR=/tmp/extensions
 
 # explicitly set user/group IDs
 RUN set -eux; \
@@ -25,8 +24,7 @@ RUN set -eux; \
 	useradd -r -g postgres --uid=999 --home-dir=/var/lib/postgresql --shell=/bin/bash postgres; \
 # also create the postgres user's home directory with appropriate permissions
 # see https://github.com/docker-library/postgres/issues/274
-	mkdir -p /var/lib/postgresql; \
-	chown -R postgres:postgres /var/lib/postgresql
+	install --verbose --directory --owner postgres --group postgres --mode 1777 /var/lib/postgresql
 
 RUN set -ex; \
 	apt-get update; \
@@ -39,13 +37,12 @@ RUN set -ex; \
 	; \
 	rm -rf /var/lib/apt/lists/*
 
-
 COPY ./src/gosu-amd64-1.17 ${TMP_DIR}
 WORKDIR ${TMP_DIR}
 
 # grab gosu for easy step-down from root
 # https://github.com/tianon/gosu/releases
-ENV GOSU_VERSION 1.17
+ENV GOSU_VERSION=1.17
 RUN set -eux; \
 	savedAptMark="$(apt-mark showmanual)"; \
 	apt-get update; \
@@ -89,7 +86,7 @@ RUN set -eux; \
 	echo 'en_US.UTF-8 UTF-8' >> /etc/locale.gen; \
 	locale-gen; \
 	locale -a | grep 'en_US.utf8'
-ENV LANG en_US.utf8
+ENV LANG=en_US.utf8
 
 RUN set -eux; \
 	apt-get update; \
@@ -114,10 +111,10 @@ RUN set -ex; \
 	gpgconf --kill all; \
 	rm -rf "$GNUPGHOME"
 
-ENV PG_MAJOR 16
-ENV PATH $PATH:/usr/lib/postgresql/$PG_MAJOR/bin
+ENV PG_MAJOR=17
+ENV PATH=$PATH:/usr/lib/postgresql/$PG_MAJOR/bin
 
-# ENV PG_VERSION 16.3-1.pgdg120+1
+# ENV PG_VERSION 17.5-1.pgdg120+1
 
 RUN set -ex; \
 	\
@@ -127,7 +124,7 @@ RUN set -ex; \
 	dpkgArch="$(dpkg --print-architecture)"; \
 	aptRepo="[ signed-by=/usr/local/share/keyrings/postgres.gpg.asc ] http://apt.postgresql.org/pub/repos/apt/ bookworm-pgdg main $PG_MAJOR"; \
 	case "$dpkgArch" in \
-		amd64 | arm64 | ppc64el | s390x) \
+		amd64 | arm64 | ppc64el) \
 # arches officialy built by upstream
 			echo "deb $aptRepo" > /etc/apt/sources.list.d/pgdg.list; \
 			apt-get update; \
@@ -208,11 +205,11 @@ RUN set -eux; \
 	sed -ri "s!^#?(listen_addresses)\s*=\s*\S+.*!\1 = '*'!" /usr/share/postgresql/postgresql.conf.sample; \
 	grep -F "listen_addresses = '*'" /usr/share/postgresql/postgresql.conf.sample
 
-RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 3777 /var/run/postgresql
+RUN install --verbose --directory --owner postgres --group postgres --mode 3777 /var/run/postgresql
 
-ENV PGDATA /var/lib/postgresql/data
+ENV PGDATA=/var/lib/postgresql/data
 # this 1777 will be replaced by 0700 at runtime (allows semi-arbitrary "--user" values)
-RUN mkdir -p "$PGDATA" && chown -R postgres:postgres "$PGDATA" && chmod 1777 "$PGDATA"
+RUN install --verbose --directory --owner postgres --group postgres --mode 1777 "$PGDATA"
 VOLUME /var/lib/postgresql/data
 
 COPY ./build/postgres/docker-entrypoint.sh /usr/local/bin/
@@ -224,18 +221,12 @@ ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 # We set the default STOPSIGNAL to SIGINT, which corresponds to what PostgreSQL
 # calls "Fast Shutdown mode" wherein new connections are disallowed and any
 # in-progress transactions are aborted, allowing PostgreSQL to stop cleanly and
-# flush tables to disk, which is the best compromise available to avoid data
-# corruption.
+# flush tables to disk.
 #
-# Users who know their applications do not keep open long-lived idle connections
-# may way to use a value of SIGTERM instead, which corresponds to "Smart
-# Shutdown mode" in which any existing sessions are allowed to finish and the
-# server stops when all sessions are terminated.
-#
-# See https://www.postgresql.org/docs/12/server-shutdown.html for more details
+# See https://www.postgresql.org/docs/current/server-shutdown.html for more details
 # about available PostgreSQL server shutdown signals.
 #
-# See also https://www.postgresql.org/docs/12/server-start.html for further
+# See also https://www.postgresql.org/docs/current/server-start.html for further
 # justification of this as the default value, namely that the example (and
 # shipped) systemd service files use the "Fast Shutdown mode" for service
 # termination.
@@ -245,10 +236,10 @@ STOPSIGNAL SIGINT
 # An additional setting that is recommended for all users regardless of this
 # value is the runtime "--stop-timeout" (or your orchestrator/runtime's
 # equivalent) for controlling how long to wait between sending the defined
-# STOPSIGNAL and sending SIGKILL (which is likely to cause data corruption).
+# STOPSIGNAL and sending SIGKILL.
 #
 # The default in most runtimes (such as Docker) is 10 seconds, and the
-# documentation at https://www.postgresql.org/docs/12/server-start.html notes
+# documentation at https://www.postgresql.org/docs/current/server-start.html notes
 # that even 90 seconds may not be long enough in many instances.
 
 EXPOSE 5432

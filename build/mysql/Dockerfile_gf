@@ -4,7 +4,7 @@ ARG CHANGE_SOURCE=false
 ARG MYSQL_VER
 ARG GOSU_VERSION
 
-ENV TMP_DIR /tmp/extensions
+ENV TMP_DIR=/tmp/extensions
 
 RUN set -eux; \
 	mkdir -p ${TMP_DIR}; \
@@ -87,8 +87,8 @@ RUN set -eux; \
 	gpgconf --kill all; \
 	rm -rf "$GNUPGHOME"
 
-ENV MYSQL_MAJOR 8.0
-ENV MYSQL_VERSION ${MYSQL_VER}-1debian12
+ENV MYSQL_MAJOR=8.0
+ENV MYSQL_VERSION=${MYSQL_VER}-1debian12
 
 RUN echo 'deb [ signed-by=/etc/apt/keyrings/mysql.gpg ] http://repo.mysql.com/apt/debian/ bookworm mysql-8.0' > /etc/apt/sources.list.d/mysql.list
 

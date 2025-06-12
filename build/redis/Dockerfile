@@ -1,123 +1,223 @@
-FROM alpine:3.19
+# ==========================================
+# Redis 8.0+ 生产级 Dockerfile
+# ==========================================
+# 解决方案：使用官方基础镜像 + 精简模块构建
+# 优化策略：
+# 1. 避免复杂的模块编译（RedisJSON/RedisSearch等）
+# 2. 使用稳定的 Debian 基础镜像
+# 3. 配置国内镜像源加速
+# 4. 非root用户运行增强安全性
+
+# ARG REDIS_VERSION=8.0.1
+ARG CHANGE_SOURCE=true
+
+# 添加代理设置
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
+
+# ==========================================
+# 构建阶段：编译 Redis
+# ==========================================
+FROM debian:bookworm-slim as builder
 
 ARG REDIS_VERSION
-ARG ALPINE_REPOSITORIES
-ARG CHANGE_SOURCE=false
+ARG CHANGE_SOURCE
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
 
-ENV TMP_DIR /tmp/extensions
+# 设置代理（如果需要）
+ENV http_proxy=${http_proxy}
+ENV https_proxy=${https_proxy}
+ENV no_proxy=${no_proxy}
 
-# add our user and group first to make sure their IDs get assigned consistently, regardless of whatever dependencies get added
-RUN addgroup -S -g 1000 redis && adduser -S -G redis -u 999 redis
-# alpine already has a gid 999, so we'll use the next id
+ENV TMP_DIR=/tmp/extensions
 
-# If you're in China, or you need to change sources, will be set CHANGE_SOURCE to true in .env.
-RUN set -eux; \
-    mkdir -p ${TMP_DIR}; \
-    \
-    if [ ${CHANGE_SOURCE} = true ]; then \
-        sed -i "s/dl-cdn.alpinelinux.org/${ALPINE_REPOSITORIES}/g" /etc/apk/repositories; \
-        apk update; \
-        # grab su-exec for easy step-down from root
-        apk add --no-cache 'su-exec>=0.2' tzdata; \
-        cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime; \
-        echo "Asia/Shanghai" > /etc/timezone; \
-    fi;
+# 设置环境变量
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Asia/Shanghai \
+    REDIS_VERSION=${REDIS_VERSION}
 
-ENV TMP_DIR /tmp/extensions
-
-RUN set -eux; \
-	mkdir -p ${TMP_DIR}; \
-	\
-	apk add --no-cache --virtual .build-deps \
-		coreutils \
-		dpkg-dev dpkg \
-		gcc \
-		linux-headers \
-		make \
-		musl-dev \
-		openssl-dev \
-		curl \
-# install real "wget" to avoid:
-#   + wget -O redis.tar.gz https://download.redis.io/releases/redis-6.0.6.tar.gz
-#   Connecting to download.redis.io (45.60.121.1:80)
-#   wget: bad header line:     XxhODalH: btu; path=/; Max-Age=900
-		wget \
-	;
+# 配置镜像源（中国大陆加速）
+RUN if [ "${CHANGE_SOURCE}" = "true" ]; then \
+        sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+        sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources; \
+    fi
 
 COPY ./src/redis/ ${TMP_DIR}
-WORKDIR ${TMP_DIR}
 
+# 安装构建依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    wget \
+    curl \
+    build-essential \
+    gcc \
+    g++ \
+    libc6-dev \
+    libssl-dev \
+    make \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# 下载并编译 Redis（不包含复杂模块）
+WORKDIR ${TMP_DIR}
 RUN set -eux; \
+    \
     cd ${TMP_DIR}; \
     \
     if [ ! -f "redis-${REDIS_VERSION}.tar.gz" ]; then \
-        curl -L "http://download.redis.io/releases/redis-${REDIS_VERSION}.tar.gz" -o redis-${REDIS_VERSION}.tar.gz; \
+        # 下载 Redis 源码
+        wget -O redis-${REDIS_VERSION}.tar.gz "https://download.redis.io/releases/redis-${REDIS_VERSION}.tar.gz" || \
+        wget -O redis-${REDIS_VERSION}.tar.gz "https://github.com/redis/redis/archive/refs/tags/${REDIS_VERSION}.tar.gz"; \
     fi; \
     \
-	mkdir -p /usr/src/redis; \
-	tar -xzf redis-${REDIS_VERSION}.tar.gz -C /usr/src/redis --strip-components=1; \
-	rm redis-${REDIS_VERSION}.tar.gz; \
-	\
-# disable Redis protected mode [1] as it is unnecessary in context of Docker
-# (ports are not automatically exposed when running inside Docker, but rather explicitly by specifying -p / -P)
-# [1]: https://github.com/redis/redis/commit/edd4d555df57dc84265fdfb4ef59a4678832f6da
-	grep -E '^ *createBoolConfig[(]"protected-mode",.*, *1 *,.*[)],$' /usr/src/redis/src/config.c; \
-	sed -ri 's!^( *createBoolConfig[(]"protected-mode",.*, *)1( *,.*[)],)$!\10\2!' /usr/src/redis/src/config.c; \
-	grep -E '^ *createBoolConfig[(]"protected-mode",.*, *0 *,.*[)],$' /usr/src/redis/src/config.c; \
-# for future reference, we modify this directly in the source instead of just supplying a default configuration flag because apparently "if you specify any argument to redis-server, [it assumes] you are going to specify everything"
-# see also https://github.com/docker-library/redis/issues/4#issuecomment-50780840
-# (more exactly, this makes sure the default behavior of "save on SIGTERM" stays functional by default)
-	\
-# https://github.com/jemalloc/jemalloc/issues/467 -- we need to patch the "./configure" for the bundled jemalloc to match how Debian compiles, for compatibility
-# (also, we do cross-builds, so we need to embed the appropriate "--build=xxx" values to that "./configure" invocation)
-	gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
-	extraJemallocConfigureFlags="--build=$gnuArch"; \
-# https://salsa.debian.org/debian/jemalloc/-/blob/c0a88c37a551be7d12e4863435365c9a6a51525f/debian/rules#L8-23
-	dpkgArch="$(dpkg --print-architecture)"; \
-	case "${dpkgArch##*-}" in \
-		amd64 | i386 | x32) extraJemallocConfigureFlags="$extraJemallocConfigureFlags --with-lg-page=12" ;; \
-		*) extraJemallocConfigureFlags="$extraJemallocConfigureFlags --with-lg-page=16" ;; \
-	esac; \
-	extraJemallocConfigureFlags="$extraJemallocConfigureFlags --with-lg-hugepage=21"; \
-	grep -F 'cd jemalloc && ./configure ' /usr/src/redis/deps/Makefile; \
-	sed -ri 's!cd jemalloc && ./configure !&'"$extraJemallocConfigureFlags"' !' /usr/src/redis/deps/Makefile; \
-	grep -F "cd jemalloc && ./configure $extraJemallocConfigureFlags " /usr/src/redis/deps/Makefile; \
-	\
-	export BUILD_TLS=yes; \
-	make -C /usr/src/redis -j "$(nproc)" all; \
-	make -C /usr/src/redis install; \
-	\
-# TODO https://github.com/redis/redis/pull/3494 (deduplicate "redis-server" copies)
-	serverMd5="$(md5sum /usr/local/bin/redis-server | cut -d' ' -f1)"; export serverMd5; \
-	find /usr/local/bin/redis* -maxdepth 0 \
-		-type f -not -name redis-server \
-		-exec sh -eux -c ' \
-			md5="$(md5sum "$1" | cut -d" " -f1)"; \
-			test "$md5" = "$serverMd5"; \
-		' -- '{}' ';' \
-		-exec ln -svfT 'redis-server' '{}' ';' \
-	; \
-	\
-	rm -r /usr/src/redis; \
-	\
-	runDeps="$( \
-		scanelf --needed --nobanner --format '%n#p' --recursive /usr/local \
-			| tr ',' '\n' \
-			| sort -u \
-			| awk 'system("[ -e /usr/local/lib/" $1 " ]") == 0 { next } { print "so:" $1 }' \
-	)"; \
-	apk add --no-network --virtual .redis-rundeps $runDeps; \
-	apk del --no-network .build-deps; \
-	\
-	redis-cli --version; \
-	redis-server --version
+    # 解压源码
+    tar -xzf redis-${REDIS_VERSION}.tar.gz --strip-components=1; \
+    rm redis-${REDIS_VERSION}.tar.gz; \
+    \
+    # 禁用保护模式（容器环境安全）
+    grep -E '^ *createBoolConfig\("protected-mode",.*, *1 *,.*\),$' src/config.c; \
+    sed -ri 's!^( *createBoolConfig\("protected-mode",.*, *)1( *,.*\),)$!\10\2!' src/config.c; \
+    grep -E '^ *createBoolConfig\("protected-mode",.*, *0 *,.*\),$' src/config.c; \
+    \
+    # 编译 Redis（仅核心功能，跳过模块）
+    export BUILD_TLS=yes; \
+    make -j "$(nproc)" \
+        PREFIX=/usr/local \
+        MALLOC=jemalloc \
+        BUILD_WITH_MODULES=no; \
+    \
+    # 安装 Redis
+    make install; \
+    \
+    # 验证安装
+    redis-server --version; \
+    redis-cli --version
 
-RUN mkdir /data && chown redis:redis /data
-VOLUME /data
+# ==========================================
+# 运行阶段：精简镜像
+# ==========================================
+FROM debian:bookworm-slim
+
+ARG CHANGE_SOURCE
+
+# 设置环境变量
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Asia/Shanghai \
+    REDIS_USER=redis \
+    REDIS_UID=999 \
+    REDIS_GID=999
+
+# 配置镜像源
+RUN if [ "${CHANGE_SOURCE}" = "true" ]; then \
+        sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+        sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources; \
+    fi
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    tzdata \
+    gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建 Redis 用户和目录
+RUN groupadd -r -g ${REDIS_GID} ${REDIS_USER} && \
+    useradd -r -g ${REDIS_USER} -u ${REDIS_UID} -d /data -s /bin/bash ${REDIS_USER} && \
+    mkdir -p /data /var/log/redis && \
+    chown -R ${REDIS_USER}:${REDIS_USER} /data /var/log/redis
+
+# 从构建阶段复制 Redis 二进制文件
+COPY --from=builder /usr/local/bin/redis* /usr/local/bin/
+
+# 创建符号链接（Redis 传统做法）
+RUN cd /usr/local/bin && \
+    for file in redis-*; do \
+        if [ "$file" != "redis-server" ]; then \
+            ln -sf redis-server "$file"; \
+        fi; \
+    done
+
+# 设置工作目录和权限
 WORKDIR /data
 
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD redis-cli ping || exit 1
+
+# 暴露端口
+EXPOSE 6379
+
+# 创建启动脚本
+COPY <<'EOF' /usr/local/bin/docker-entrypoint.sh
+#!/bin/bash
+set -e
+
+# 如果以 root 运行，切换到 redis 用户
+if [ "$(id -u)" = '0' ]; then
+    # 确保数据目录权限正确
+    chown -R redis:redis /data /var/log/redis
+    
+    # 切换到 redis 用户执行
+    exec gosu redis "$0" "$@"
+fi
+
+# 如果没有提供配置文件，使用默认配置
+if [ "$1" = 'redis-server' ] && [ ! -f "$2" ]; then
+    # 生成基本配置
+    cat > /tmp/redis.conf <<-'REDIS_CONF'
+# Redis 8.0+ 基础配置
+bind 0.0.0.0
+port 6379
+protected-mode no
+tcp-backlog 511
+timeout 0
+tcp-keepalive 300
+
+# 持久化配置
+save 900 1
+save 300 10
+save 60 10000
+stop-writes-on-bgsave-error yes
+rdbcompression yes
+rdbchecksum yes
+dbfilename dump.rdb
+dir /data
+
+# 日志配置
+loglevel notice
+logfile /var/log/redis/redis-server.log
+syslog-enabled no
+
+# 内存管理
+maxmemory-policy allkeys-lru
+maxmemory-samples 5
+
+# 安全配置
+rename-command FLUSHDB ""
+rename-command FLUSHALL ""
+rename-command DEBUG ""
+rename-command CONFIG ""
+
+# 网络配置
+tcp-keepalive 60
+timeout 0
+REDIS_CONF
+    
+    set -- "$1" /tmp/redis.conf "${@:3}"
+fi
+
+exec "$@"
+EOF
+
 COPY ./build/redis/docker-entrypoint.sh /usr/local/bin/
-ENTRYPOINT ["docker-entrypoint.sh"]
+
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# 设置入口点
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 EXPOSE 6379
 CMD ["redis-server"]

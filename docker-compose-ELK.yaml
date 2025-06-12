@@ -1,11 +1,17 @@
-version: "3"
-
 x-common:
   &default-common
-  restart: always
+  restart: unless-stopped
   env_file: ./.env
   dns:
     - ${DNS:-223.5.5.5}
+    - ${DNS_BACKUP:-114.114.114.114}
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "100m"
+      max-file: "3"
+  security_opt:
+    - no-new-privileges:true  # 禁用新特权，防止容器获取额外权限，提高安全性
 
 services:
 
@@ -18,29 +24,52 @@ services:
       args:
         ELK_VERSION: ${ELK_VERSION}
         TINI_VERSION: ${TINI_VERSION}
-        ELASTICSEARCH_PLUGINS: ${ELASTICSEARCH_PLUGINS}
-        CHANGE_SOURCE: ${CHANGE_SOURCE}
+        ELASTICSEARCH_PLUGINS: ${ELASTICSEARCH_PLUGINS:-}
+        CHANGE_SOURCE: ${CHANGE_SOURCE:-false}
     container_name: elasticsearch
     environment:
-      TZ: $TZ
-      NODE_NAME: elasticsearch
-      ES_JAVA_OPTS: ${ES_JAVA_OPTS}
-      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-}
+      TZ: ${TZ:-Asia/Shanghai}
+      # 只保留JVM设置，移除所有Elasticsearch配置参数
+      ES_JAVA_OPTS: "-Xms512m -Xmx1g"
+      # 禁用AWS SDK日志记录来减少警告
+      AWS_SDK_LOAD_CONFIG: "false"
+      # 设置日志级别
+      ELASTIC_CONTAINER: "true"
     volumes:
-      - ${ELASTICSEARCH_DATA_PATH}/:/usr/share/elasticsearch/data
-      - ${ELASTICSEARCH_LOG_DIR}/:/usr/share/elasticsearch/logs:rw
-      - ${ELASTICSEARCH_CONF_DIR}:/usr/share/elasticsearch/config:rw
+      - elasticsearch_data:/usr/share/elasticsearch/data
+      - elasticsearch_logs:/usr/share/elasticsearch/logs
+      - ${ELASTICSEARCH_CONF_DIR:-./conf/elasticsearch}/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+      - ${ELASTICSEARCH_CONF_DIR:-./conf/elasticsearch}/log4j2.properties:/usr/share/elasticsearch/config/log4j2.properties:ro
     hostname: elasticsearch
-    restart: always
     ports:
-      - "${ELASTICSEARCH_HOST_PORT}:9200"
-      # - "${ELASTICSEARCH_HOST_PORT_S}:9300"
+      - "127.0.0.1:${ELASTICSEARCH_HOST_PORT:-9200}:9200"
+      - "127.0.0.1:${ELASTICSEARCH_HOST_PORT_S:-9300}:9300"
     ulimits:
       memlock:
         soft: -1
         hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+      nproc:
+        soft: 4096
+        hard: 4096
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health?timeout=10s | grep -E '\"status\":(\"green\"|\"yellow\")' || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: "2g"
+          cpus: "1"
+        reservations:
+          memory: "512m"
+          cpus: "0.25"
     networks:
-      - default
+      - elk_network
 
   kibana:
     << : *default-common
@@ -51,25 +80,64 @@ services:
       args:
         ELK_VERSION: ${ELK_VERSION}
         TINI_VERSION: ${TINI_VERSION}
-        CHANGE_SOURCE: ${CHANGE_SOURCE}
+        CHANGE_SOURCE: ${CHANGE_SOURCE:-false}
     environment:
-      TZ: "$TZ"
-      SERVER_PUBLICBASEURL: ${KIBANA_PUBLIC_BASE_URL}
-      ELASTICSEARCH_REQUESTTIMEOUT: 300000
-      I18N_LOCALE: "${KIBANA_I18N_LOCALE}"
+      TZ: "${TZ:-Asia/Shanghai}"
+      # Node.js 内存配置（重要：解决堆内存不足问题）
+      NODE_OPTIONS: "--max-old-space-size=1024"
+      # 服务器配置
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: 5601
+      SERVER_PUBLICBASEURL: ${KIBANA_PUBLIC_BASE_URL:-}
+      SERVER_BASEPATH: ${KIBANA_BASE_PATH:-}
+      # Elasticsearch 连接
       ELASTICSEARCH_HOSTS: http://elasticsearch:9200
-      ELASTICSEARCH_USERNAME: "kibana_system"
-      ELASTICSEARCH_PASSWORD: ${KIBANA_SYSTEM_PASSWORD:-}
+      ELASTICSEARCH_USERNAME: ${KIBANA_ELASTICSEARCH_USERNAME:-}
+      ELASTICSEARCH_PASSWORD: ${KIBANA_ELASTICSEARCH_PASSWORD:-}
+      # 本地化设置
+      I18N_LOCALE: "${KIBANA_I18N_LOCALE:-zh-CN}"
+      # 安全配置（禁用不必要的安全功能）
+      XPACK_SECURITY_ENCRYPTIONKEY: ${KIBANA_ENCRYPTION_KEY:-changeme-32-character-key-please}
+      XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY: ${KIBANA_ENCRYPTION_KEY:-changeme-32-character-key-please}
+      XPACK_REPORTING_ENCRYPTIONKEY: ${KIBANA_ENCRYPTION_KEY:-changeme-32-character-key-please}
+      # 监控配置
+      XPACK_MONITORING_ENABLED: "false"
+      XPACK_MONITORING_KIBANA_COLLECTION_ENABLED: "false"
+      # 性能优化配置
+      LOGGING_ROOT_LEVEL: warn
+      TELEMETRY_ENABLED: "false"
+      TELEMETRY_OPTIN: "false"
+      # 内存和性能优化
+      SERVER_MAXPAYLOAD: "1048576"
+      ELASTICSEARCH_PINGTIMEOUT: "1500"
+      ELASTICSEARCH_REQUESTTIMEOUT: "30000"
+      # 开发模式配置（可选）
+      ELASTICSEARCH_HOSTS_ALLOWFROMURL: "true"
     volumes:
-      - ${KIBANA_CONF_DIR}:/usr/share/kibana/config:rw
+      - ${KIBANA_CONF_DIR:-./conf/kibana}:/usr/share/kibana/config:ro
+      - kibana_data:/usr/share/kibana/data:rw
     hostname: kibana
     depends_on:
-      - elasticsearch
-    restart: always
+      elasticsearch:
+        condition: service_healthy
     ports:
-      - "${KIBANA_HOST}:5601"
+      - "127.0.0.1:${KIBANA_HOST_PORT:-5601}:5601"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: ${KIBANA_MEMORY_LIMIT:-2g}
+          cpus: ${KIBANA_CPU_LIMIT:-2}
+        reservations:
+          memory: ${KIBANA_MEMORY_RESERVATION:-512m}
+          cpus: ${KIBANA_CPU_RESERVATION:-0.5}
     networks:
-      - default
+      - elk_network
 
   logstash:
     << : *default-common
@@ -79,32 +147,78 @@ services:
       dockerfile: ./build/elk/logstash/Dockerfile
       args:
         ELK_VERSION: ${ELK_VERSION}
-        CHANGE_SOURCE: ${CHANGE_SOURCE}
+        CHANGE_SOURCE: ${CHANGE_SOURCE:-false}
     hostname: logstash
-    restart: always
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     environment:
-      TZ: $TZ
+      TZ: ${TZ:-Asia/Shanghai}
       NODE_NAME: logstash
-      PIPELINE_WORKERS: 8
-      PIPELINE_BATCH_SIZE: 500
-      PIPELINE_BATCH_DELAY: 5
-      XPACK_MONITORING_ENABLED: false
-      LS_JAVA_OPTS: ${LS_JAVA_OPTS}
-      LOGSTASH_INTERNAL_PASSWORD: ${LOGSTASH_INTERNAL_PASSWORD:-}
+      PIPELINE_WORKERS: ${LOGSTASH_WORKERS:-2}
+      PIPELINE_BATCH_SIZE: ${LOGSTASH_BATCH_SIZE:-125}
+      PIPELINE_BATCH_DELAY: ${LOGSTASH_BATCH_DELAY:-50}
+      # 简化监控配置
+      XPACK_MONITORING_ENABLED: "false"
+      LS_JAVA_OPTS: "${LS_JAVA_OPTS:--Xms256m -Xmx512m}"
+      LOG_LEVEL: warn
+      # 通过环境变量配置 Logstash（避免文件系统权限问题）
+      CONFIG_RELOAD_AUTOMATIC: "true"
+      CONFIG_RELOAD_INTERVAL: "3s"
+      QUEUE_TYPE: "memory"
+      QUEUE_MAX_EVENTS: "1000"
     volumes:
-      - ${LOGSTASH_CONF_DIR}:/usr/share/logstash/config:rw
-      - ${LOGSTASH_PIPELINE_CONF_DIR}:/usr/share/logstash/pipeline:rw
+      # 使用配置目录挂载，给予读写权限
+      - ${LOGSTASH_CONF_DIR:-./conf/logstash}:/usr/share/logstash/config:rw
+      # Pipeline 配置目录
+      - ${LOGSTASH_PIPELINE_CONF_DIR:-./conf/logstash/pipeline}:/usr/share/logstash/pipeline:ro
+      # 数据和日志目录需要写权限
+      - logstash_data:/usr/share/logstash/data:rw
+      - logstash_logs:/usr/share/logstash/logs:rw
     ports:
-      - "${LOGSTASH_HOST_PORT_C}:9600"
-      - "${LOGSTASH_HOST_PORT_S}:5044"
+      - "127.0.0.1:${LOGSTASH_HOST_PORT_C:-9600}:9600"
+      - "127.0.0.1:${LOGSTASH_HOST_PORT_S:-5044}:5044"
+      - "127.0.0.1:${LOGSTASH_HOST_PORT_TCP:-5000}:5000"
+      - "127.0.0.1:${LOGSTASH_HOST_PORT_HTTP:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9600/?pretty | grep -q '\"status\":\"green\"' || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: ${LOGSTASH_MEMORY_LIMIT:-1g}
+          cpus: ${LOGSTASH_CPU_LIMIT:-1}
+        reservations:
+          memory: ${LOGSTASH_MEMORY_RESERVATION:-256m}
+          cpus: ${LOGSTASH_CPU_RESERVATION:-0.25}
     networks:
-      - default
+      - elk_network
+
 
 networks:
-  default:
+  elk_network:
     driver: bridge
     driver_opts:
-      com.docker.network.enable_ipv6: 0
-    internal: true
+      com.docker.network.enable_ipv6: "false"
+      com.docker.network.bridge.name: br-elk
+    name: elk_network
+    ipam:
+      config:
+        - subnet: ${ELK_NETWORK_SUBNET:-172.28.0.0/24}
+
+volumes:
+  elasticsearch_data:
+    driver: local
+  elasticsearch_logs:
+    driver: local
+  elasticsearch_certs:
+    driver: local
+  logstash_data:
+    driver: local
+  logstash_logs:
+    driver: local
+  kibana_data:
+    driver: local

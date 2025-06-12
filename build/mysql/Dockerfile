@@ -1,17 +1,21 @@
 FROM debian:bookworm-slim
 
+# 添加代理设置
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
+
 ARG CHANGE_SOURCE=false
 ARG MYSQL_VER
 ARG BOOST_VER
 ARG GOSU_VERSION
-ARG MYSQL_DATA_DIR
 
-ENV TMP_DIR /tmp/extensions
+ENV TMP_DIR=/tmp/extensions
 ENV MYSQL_INSTALL_DIR=/usr/local/mysql
 
 RUN set -eux; \
 	\
-	if [ ${CHANGE_SOURCE} = true ]; then \
+	if [ "${CHANGE_SOURCE:-false}" = "true" ]; then \
 		sed -i 's@deb.debian.org@mirrors.ustc.edu.cn@g' /etc/apt/sources.list.d/debian.sources; \
 	fi; \
 	\
@@ -75,12 +79,6 @@ RUN set -eux; \
 	tar xJf mysql-${MYSQL_VER}-linux-glibc2.28-x86_64.tar.xz; \
     mv mysql-${MYSQL_VER}-linux-glibc2.28-x86_64/* ${MYSQL_INSTALL_DIR}; \
 	rm -fr ${MYSQL_INSTALL_DIR}/bin/mysqld-debug; \
-	# tar xzf mysql-boost-${MYSQL_VER}.tar.gz; \
-	# cd mysql-${MYSQL_VER}; \
-	# [ -e "/usr/bin/cmake3" ] && CMAKE=cmake3 || CMAKE=cmake; \
-	# $CMAKE . -DCMAKE_INSTALL_PREFIX=${MYSQL_INSTALL_DIR} -DMYSQL_DATADIR=${MYSQL_DATA_DIR} -DWITH_BOOST=../boost/boost_${BOOST_VER} -DDOWNLOAD_BOOST=1 -DFORCE_INSOURCE_BUILD=1 -DSYSCONFDIR=/etc -DWITH_INNOBASE_STORAGE_ENGINE=1 -DWITH_FEDERATED_STORAGE_ENGINE=1 -DWITH_BLACKHOLE_STORAGE_ENGINE=1 -DWITH_MYISAM_STORAGE_ENGINE=1 -DENABLED_LOCAL_INFILE=1 -DFORCE_INSOURCE_BUILD=1 -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DDEFAULT_CHARSET=utf8mb4; \
-    # make -j 4; \
-    # make install; \
 	\
 	if [ -d "${MYSQL_INSTALL_DIR}/support-files" ]; then \
 		sed -i 's@executing mysqld_safe@executing mysqld_safe\nexport LD_PRELOAD=/usr/local/lib/libjemalloc.so@' ${MYSQL_INSTALL_DIR}/bin/mysqld_safe; \

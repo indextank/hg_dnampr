@@ -1,5 +1,9 @@
 FROM alpine:3.20
 
+# 代理设置参数
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
 
 ARG TENGINE_VERSION
 ARG HMNM_VERSION
@@ -11,7 +15,7 @@ ARG CHANGE_SOURCE=false
 RUN rm -rf /var/cache/apk/* && \
     rm -rf /tmp/*
 
-ENV TMP_DIR /tmp/extensions
+ENV TMP_DIR=/tmp/extensions
 
 # If you're in China, or you need to change sources, will be set CHANGE_SOURCE to true in .env.
 RUN set -eux; \
@@ -28,7 +32,7 @@ RUN set -eux; \
 COPY ./src/nginx/ ${TMP_DIR}
 WORKDIR ${TMP_DIR}
 
-ENV CONFIG "\
+ENV CONFIG="\
         --prefix=/etc/nginx \
         --sbin-path=/usr/sbin/nginx \
         --modules-path=/usr/lib/nginx/modules \
@@ -78,10 +82,11 @@ ENV CONFIG "\
 	    --add-module=modules/ngx_http_upstream_session_sticky_module \
         "
 RUN set -eux; \
-	\
+    # 创建用户和组
     addgroup -S nginx; \
     adduser -D -S -h /var/cache/nginx -s /sbin/nologin -G nginx nginx; \
     adduser -u 82 -D -S -G www-data www-data; \
+    # 安装构建依赖
     apk add --no-cache --virtual .build-deps \
             gcc \
             libc-dev \
@@ -96,6 +101,7 @@ RUN set -eux; \
             geoip-dev; \
     cd ${TMP_DIR}; \
     \
+    # 下载源码
     if [ ! -f "tengine-$TENGINE_VERSION.tar.gz" ]; then \
         curl -L "https://github.com/alibaba/tengine/archive/$TENGINE_VERSION.tar.gz" -o tengine-$TENGINE_VERSION.tar.gz; \
     fi; \
@@ -123,11 +129,11 @@ RUN set -eux; \
     ./configure $CONFIG; \
     make -j$(getconf _NPROCESSORS_ONLN); \
     make install; \
-    rm -rf /etc/nginx/html/; \
+    # rm -rf /etc/nginx/html/; \
     mkdir /etc/nginx/conf.d/; \
-    mkdir -p /usr/share/nginx/html/; \
-    install -m644 html/index.html /usr/share/nginx/html/; \
-    install -m644 html/50x.html /usr/share/nginx/html/; \
+    # mkdir -p /etc/nginx/html/; \
+    install -m644 html/index.html /etc/nginx/html/; \
+    install -m644 html/50x.html /etc/nginx/html/; \
     install -m755 objs/nginx-debug /usr/sbin/nginx-debug; \
     install -m755 objs/ngx_http_xslt_filter_module-debug.so /usr/lib/nginx/modules/ngx_http_xslt_filter_module-debug.so; \
     install -m755 objs/ngx_http_image_filter_module-debug.so /usr/lib/nginx/modules/ngx_http_image_filter_module-debug.so; \
@@ -153,15 +159,38 @@ RUN set -eux; \
     apk add --no-cache --virtual .nginx-rundeps $runDeps; \
     apk del .build-deps; \
     apk del .gettext; \
-    mv /tmp/envsubst /usr/local/bin/;
-    # \
+    mv /tmp/envsubst /usr/local/bin/; \
+    \
     # Bring in tzdata so users could set the timezones through the environment
     # variables
-    # apk update && apk add --no-cache tzdata curl ca-certificates
-    # \
+    apk add --no-cache tzdata curl ca-certificates; \
+    \
+    # 清理构建依赖和临时文件，减小镜像体积
+    cd /; \
+    rm -rf ${TMP_DIR}/*; \
+    \
     # forward request and error logs to docker log collector
-    # ln -sf /dev/stdout /var/log/nginx/access.log \
-    # ln -sf /dev/stderr /var/log/nginx/error.log
+    ln -sf /dev/stdout /var/log/nginx/access.log; \
+    ln -sf /dev/stderr /var/log/nginx/error.log
+
+# 创建proxy.conf配置文件
+RUN { \
+    echo 'proxy_connect_timeout 300s;'; \
+    echo 'proxy_send_timeout 900;'; \
+    echo 'proxy_read_timeout 900;'; \
+    echo 'proxy_buffer_size 32k;'; \
+    echo 'proxy_buffers 4 64k;'; \
+    echo 'proxy_busy_buffers_size 128k;'; \
+    echo 'proxy_redirect off;'; \
+    echo 'proxy_hide_header Vary;'; \
+    echo "proxy_set_header Accept-Encoding '';"; \
+    echo 'proxy_set_header Referer $http_referer;'; \
+    echo 'proxy_set_header Cookie $http_cookie;'; \
+    echo 'proxy_set_header Host $host;'; \
+    echo 'proxy_set_header X-Real-IP $remote_addr;'; \
+    echo 'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;'; \
+    echo 'proxy_set_header X-Forwarded-Proto $scheme;'; \
+} | tee "/etc/nginx/proxy.conf"
 
 COPY ./conf/nginx/tengine/nginx.conf /etc/nginx/
 COPY ./vhost/nginx_vhost/certs/* /etc/nginx/conf/ssl/

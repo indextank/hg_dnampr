@@ -5,7 +5,7 @@ FROM debian:bullseye-slim
 ARG CHANGE_SOURCE=false
 ARG ELK_VERSION
 
-ENV TMP_DIR /tmp/extensions
+ENV TMP_DIR=/tmp/extensions
 
 RUN set -eux; \
 	\
@@ -54,7 +54,7 @@ RUN set -eux; \
 
 WORKDIR /usr/share/logstash
 
-ENV ELASTIC_CONTAINER true
+ENV ELASTIC_CONTAINER=true
 ENV PATH=/usr/share/logstash/bin:$PATH
 
 # Provide a minimal configuration, so that simple invocations will provide
@@ -65,7 +65,10 @@ COPY ./conf/logstash/log4j2.properties config/
 COPY ./conf/logstash/log4j2.file.properties config/
 COPY ./conf/logstash/conf.d/default.conf pipeline/logstash.conf
 
-RUN chown --recursive logstash:root config/ pipeline/
+RUN chown --recursive logstash:root config/ pipeline/ && \
+    chmod -R 664 config/*.yml config/*.properties config/*.conf && \
+    chmod -R 664 pipeline/*.conf && \
+    chmod -R 775 config/ pipeline/
 
 # Ensure Logstash gets the correct locale by default.
 ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
@@ -75,7 +78,14 @@ COPY ./build/elk/logstash/env2yaml /usr/local/bin/
 # Place the startup wrapper script.
 COPY ./build/elk/logstash/docker-entrypoint /usr/local/bin/
 
-RUN chmod 0755 /usr/local/bin/docker-entrypoint
+RUN chmod 0755 /usr/local/bin/docker-entrypoint && \
+    chmod 0755 /usr/local/bin/env2yaml
+
+# Ensure config directory and files are writable
+RUN chmod -R 775 /usr/share/logstash/config && \
+    chmod 664 /usr/share/logstash/config/*.yml && \
+    chmod 664 /usr/share/logstash/config/*.properties && \
+    chown -R logstash:logstash /usr/share/logstash/config
 
 USER 1000
 

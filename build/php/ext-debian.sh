@@ -16,7 +16,7 @@ php_detail_version=$(/usr/local/bin/php-config --version)
 php_main_version=${php_detail_version%.*}
 
 if [ "${PHP_EXTENSIONS}" != "" ]; then
-    echo "\n---------- Install general dependencies ----------\n"
+    echo "---------- Install general dependencies ----------"
     # mv /etc/apt/sources.list /etc/apt/sources.list.new
     # cp -rf /etc/apt/sources.list.bak /etc/apt/sources.list
     apt-get update
@@ -26,23 +26,23 @@ if [ "${PHP_EXTENSIONS}" != "" ]; then
     # mv /etc/apt/sources.list /etc/apt/sources.list.bak
     # cp -rf /etc/apt/sources.list.new /etc/apt/sources.list
     apt-get update
-    apt-get install -y --assume-yes lsof pkg-config apt-utils wget gcc g++ make cmake unzip autoconf automake libtool libssl-dev libpq-dev libedit-dev libzip-dev libicu-dev libxslt-dev binutils libyaml-dev iputils-ping vim libc-ares-dev libcurl4-openssl-dev
+    apt-get install -y --assume-yes lsof pkg-config apt-utils wget gcc g++ make cmake unzip autoconf automake libtool libssl-dev libpq-dev libedit-dev libzip-dev libicu-dev libxslt-dev binutils libyaml-dev iputils-ping nano libc-ares-dev libcurl4-openssl-dev libbrotli-dev
     rm -rf /var/lib/apt/lists/*
 fi
 
 if [ -z "${EXTENSIONS##*,opcache,*}" ]; then
-    echo "\n---------- Install opcache ----------\n"
+    echo "---------- Install opcache ----------"
     docker-php-ext-install opcache
 fi
 
 if [ -z "${EXTENSIONS##*,yaf,*}" ]; then
-    echo "\n---------- Install yaf ----------\n"
+    echo "---------- Install yaf ----------"
     printf "\n" | pecl install yaf
     docker-php-ext-enable yaf
 fi
 
 if [ -z "${EXTENSIONS##*,memcached,*}" ]; then
-    echo "\n---------- Install memcached extension ----------\n"
+    echo "---------- Install memcached extension ----------"
 	apt-get install -y libmemcached-dev zlib1g-dev \
     printf "\n" | pecl install memcached-3.2.0
     docker-php-ext-enable memcached
@@ -51,7 +51,7 @@ fi
 if [ -z "${EXTENSIONS##*,swoole,*}" ]; then
 
     cd "${TMP_DIR}"
-    echo "\n---------- Install swoole extension ----------\n"
+    echo "---------- Install swoole extension ----------"
 
     if [[ "${php_main_version}" =~ ^5.[3-6]$ ]]; then
         if [ ! -f swoole-2.0.11.tgz ]; then
@@ -123,7 +123,7 @@ fi
 if [ -z "${EXTENSIONS##*,yaml,*}" ]; then
 
     cd "${TMP_DIR}"
-    echo "\n---------- Install yaml extension ----------\n"
+    echo "---------- Install yaml extension ----------"
 
     # 7.0+
     if [[ "${php_main_version}" =~ ^7.[0-4]$|8.[0-4]$ ]]; then
@@ -151,7 +151,7 @@ fi
 if [ -z "${EXTENSIONS##*,redis,*}" ]; then
 
     cd "${TMP_DIR}"
-    echo "\n---------- Install redis extension ----------\n"
+    echo "---------- Install redis extension ----------"
 
     if [ -n "${REDIS_EXT_VERSION}" ]; then
         if [ ! -f redis-${REDIS_EXT_VERSION}.tgz ]; then
@@ -176,7 +176,7 @@ fi
 if [ -z "${EXTENSIONS##*,xdebug,*}" ]; then
 
     cd "${TMP_DIR}"
-    echo "\n---------- Install xdebug extension ----------\n"
+    echo "---------- Install xdebug extension ----------"
 
     if [[ "${php_main_version}" =~ ^5.[0-6]$ ]]; then
         echo "Your php ${php_main_version} does not support xdebug! ";
@@ -239,10 +239,10 @@ if [ -z "${EXTENSIONS##*,imagick,*}" ]; then
     cd "${TMP_DIR}"
 
     if [ ! -f "/usr/local/imagemagick" ]; then
-        echo "\n---------- Install ImageMagick ----------\n"
+        echo "---------- Install ImageMagick ----------"
 
         if [ ! -f ImageMagick-${IMAGICK_VERSION}.tar.gz ]; then
-            curl -L "https://github.com/ImageMagick/ImageMagick/archive/refs/tags/${IMAGICK_VERSION}.tar.gz" -o ImageMagick-${IMAGICK_VERSION}.tar.gz
+            curl -L https://github.com/ImageMagick/ImageMagick/archive/refs/tags/${IMAGICK_VERSION}.tar.gz -o ImageMagick-${IMAGICK_VERSION}.tar.gz
         fi
         tar xzf ImageMagick-${IMAGICK_VERSION}.tar.gz
         cd ImageMagick-${IMAGICK_VERSION} > /dev/null
@@ -254,7 +254,7 @@ if [ -z "${EXTENSIONS##*,imagick,*}" ]; then
     fi
 
     cd "${TMP_DIR}"
-    echo "\n---------- Install imagick extension ----------\n"
+    echo "---------- Install imagick extension ----------"
 
     if [ -n "${IMAGICK_VERSION}" ]; then
         if [ ! -f imagick-${IMAGICK_EXT_VERSION}.tgz ]; then
@@ -279,7 +279,7 @@ fi
 if [ -z "${EXTENSIONS##*,mongodb,*}" ]; then
 
     cd "${TMP_DIR}"
-    echo "\n---------- Install mongodb extension ----------\n"
+    echo "---------- Install mongodb extension ----------"
     apt-get install -y unixodbc-dev
 
     if [[ "${php_main_version}" =~ ^5.[3-6]$ ]]; then
@@ -331,7 +331,7 @@ fi
 if [ -z "${EXTENSIONS##*,grpc,*}" ]; then
 
     cd "${TMP_DIR}"
-    echo "\n---------- Install grpc extension ----------\n"
+    echo "---------- Install grpc extension ----------"
     apt-get update && apt-get install -y zlib1g-dev
 
     if [ -n "${GRPC_EXT_VERSION}" ]; then
@@ -361,7 +361,7 @@ fi
 if [ -z "${EXTENSIONS##*,protobuf,*}" ]; then
 
     cd "${TMP_DIR}"
-    echo "\n---------- Install protobuf ----------\n"
+    echo "---------- Install protobuf ----------"
 
     if [ ! -f protoc-${PROTOBUF_VERSION}-linux-x86_64.zip ]; then
         wget --limit-rate=100M --tries=6 -c --no-check-certificate https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protoc-${PROTOBUF_VERSION}-linux-x86_64.zip
@@ -375,7 +375,7 @@ if [ -z "${EXTENSIONS##*,protobuf,*}" ]; then
 
     cd "${TMP_DIR}"
     if [ -f "/usr/local/bin/protoc" ];then
-        echo "\n---------- Install protobuf extension ----------\n"
+        echo "---------- Install protobuf extension ----------"
 
         if [ -n "${PROTOBUF_EXT_VERSION}" ]; then
             if [ ! -f protobuf-${PROTOBUF_EXT_VERSION}.tgz ]; then
@@ -400,7 +400,7 @@ fi
 if [ -z "${EXTENSIONS##*,rdkafka,*}" ]; then
 
     cd "${TMP_DIR}"
-    echo "\n---------- Install librdkafka ----------\n"
+    echo "---------- Install librdkafka ----------"
 
     if [ ! -f librdkafka-${LIBRDKAFKA_VERSION}.tar.gz ]; then
         wget --limit-rate=100M --tries=6 -c --no-check-certificate https://codeload.github.com/edenhill/librdkafka/tar.gz/v${LIBRDKAFKA_VERSION} -O librdkafka-${LIBRDKAFKA_VERSION}.tar.gz
@@ -412,7 +412,7 @@ if [ -z "${EXTENSIONS##*,rdkafka,*}" ]; then
             && ( cd librdkafka && ./configure && make ${MC} && make install && cd .. && rm -fr librdkafka )
 
         cd "${TMP_DIR}"
-        echo "\n---------- Install rdkafka extension ----------\n"
+        echo "---------- Install rdkafka extension ----------"
 
         if [ -n "${RDKAFKA_EXT_VERSION}" ]; then
             if [ ! -f rdkafka-${RDKAFKA_EXT_VERSION}.tgz ]; then
@@ -437,7 +437,7 @@ fi
 if [ -z "${EXTENSIONS##*,zookeeper,*}" ]; then
 
     cd "${TMP_DIR}"
-    echo "\n---------- Install apache-zookeeper ----------\n"
+    echo "---------- Install apache-zookeeper ----------"
     apt-get update && apt-get install -y libcppunit-dev file ant libcppunit-dev git
 
     if [ ! -f apache-zookeeper-${ZOOKEEPER_VERSION}.tar.gz ]; then
@@ -457,7 +457,7 @@ if [ -z "${EXTENSIONS##*,zookeeper,*}" ]; then
 
         cd "${TMP_DIR}"
         rm -fr zookeeper
-        echo "\n---------- Install zookeeper extension ----------\n"
+        echo "---------- Install zookeeper extension ----------"
 
         if [ -n "${ZOOKEEPER_EXT_VERSION}" ]; then
             if [ ! -f zookeeper-${ZOOKEEPER_EXT_VERSION}.tgz ];then
