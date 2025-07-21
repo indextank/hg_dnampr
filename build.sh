@@ -53,30 +53,30 @@ success() {
 # 设置配置目录权限，避免容器内权限问题
 setup_conf_permissions() {
     info "设置配置目录权限..."
-    
+
     # 确保conf目录存在并设置权限
     if [ -d "./conf" ]; then
         # 设置目录权限为755，文件权限为644
         find ./conf -type d -exec chmod 755 {} \; 2>/dev/null || true
         find ./conf -type f -exec chmod 644 {} \; 2>/dev/null || true
-        
+
         # 特别处理logstash配置文件，需要写权限
         if [ -d "./conf/logstash" ]; then
             chmod -R 777 ./conf/logstash 2>/dev/null || true
             # find ./conf/logstash -name "*.yml" -exec chmod 664 {} \; 2>/dev/null || true
             # find ./conf/logstash -name "*.properties" -exec chmod 664 {} \; 2>/dev/null || true
         fi
-        
+
         # 设置elasticsearch配置权限
         if [ -d "./conf/elasticsearch" ]; then
             chmod -R 755 ./conf/elasticsearch 2>/dev/null || true
         fi
-        
+
         # 设置kibana配置权限
         if [ -d "./conf/kibana" ]; then
             chmod -R 755 ./conf/kibana 2>/dev/null || true
         fi
-        
+
         info "配置目录权限设置完成"
     else
         warn "配置目录 ./conf 不存在"
@@ -134,10 +134,18 @@ ${YELLOW}特殊组合:${NC}
 EOF
 }
 
-# 代理配置变量（方便维护修改）
-DEFAULT_HTTP_PROXY="http://host.docker.internal:60010"
-DEFAULT_HTTPS_PROXY="http://host.docker.internal:60010"
-DEFAULT_NO_PROXY="localhost,127.0.0.1,172.17.0.0/16,host.docker.internal"
+# 从 .env 文件中获取代理配置
+if [ -n "$http_proxy" ]; then
+    DEFAULT_HTTP_PROXY="$http_proxy"
+fi
+
+if [ -n "$https_proxy" ]; then
+    DEFAULT_HTTPS_PROXY="$https_proxy"
+fi
+
+if [ -n "$no_proxy" ]; then
+    DEFAULT_NO_PROXY="$no_proxy"
+fi
 
 # 检测是否为WSL环境
 is_wsl_environment() {
@@ -150,25 +158,25 @@ is_wsl_environment() {
 # 智能代理检测函数
 detect_and_set_proxy() {
     log "执行智能代理检测..."
-    
+
     # 检查是否强制禁用代理检测
     if [[ "${DISABLE_PROXY_DETECTION:-false}" == "true" ]]; then
         log "代理检测已被禁用 (DISABLE_PROXY_DETECTION=true)"
         return 0
     fi
-    
+
     # 检测地理位置
     local location=""
     local timeout=10
-    
+
     info "正在检测地理位置..."
-    
+
     # 方法1: 使用ipinfo.io检测
     location=$(timeout $timeout curl -s --connect-timeout 5 "https://ipinfo.io/country" 2>/dev/null || echo "")
     if [[ -n "$location" ]]; then
         info "通过 ipinfo.io 检测到位置: $location"
     fi
-    
+
     # 方法2: 如果第一种方法失败，使用ip-api.com
     if [[ -z "$location" ]]; then
         location=$(timeout $timeout curl -s --connect-timeout 5 "http://ip-api.com/line?fields=countryCode" 2>/dev/null || echo "")
@@ -176,7 +184,7 @@ detect_and_set_proxy() {
             info "通过 ip-api.com 检测到位置: $location"
         fi
     fi
-    
+
     # 方法3: 检查特定网站的可访问性
     if [[ -z "$location" ]]; then
         info "尝试通过网站可访问性判断位置..."
@@ -187,20 +195,20 @@ detect_and_set_proxy() {
             fi
         fi
     fi
-    
+
     # 根据位置设置代理和镜像源
     if [[ "$location" =~ ^(CN|China|中国)$ ]]; then
         log "检测到位置在中国大陆..."
-        
+
         # 从.env文件读取代理配置
         local env_http_proxy=""
         local env_https_proxy=""
-        
+
         if [[ -f ".env" ]]; then
             env_http_proxy=$(grep "^http_proxy=" .env 2>/dev/null | cut -d'=' -f2- | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
             env_https_proxy=$(grep "^https_proxy=" .env 2>/dev/null | cut -d'=' -f2- | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
         fi
-        
+
         # 检查代理配置是否为空
         if [[ -z "$env_http_proxy" || -z "$env_https_proxy" ]]; then
             if is_wsl_environment; then
@@ -216,14 +224,14 @@ detect_and_set_proxy() {
                 echo -e "${YELLOW}${BOLD}   http_proxy=$DEFAULT_HTTP_PROXY${NC}"
                 echo -e "${YELLOW}${BOLD}   https_proxy=$DEFAULT_HTTPS_PROXY${NC}"
                 echo -e "${YELLOW}${BOLD}   10秒后继续执行...${NC}\n"
-                
+
                 # 倒计时显示
                 for i in {10..1}; do
                     echo -ne "${YELLOW}${BOLD}倒计时: $i 秒\r${NC}"
                     sleep 1
                 done
                 echo -e "\n${GREEN}继续执行构建...${NC}\n"
-                
+
                 # 设置默认的no_proxy
                 export no_proxy="$DEFAULT_NO_PROXY"
             fi
@@ -234,10 +242,10 @@ detect_and_set_proxy() {
             export no_proxy="$DEFAULT_NO_PROXY"
             info "代理配置: $env_http_proxy"
         fi
-        
+
         # 中国大陆启用镜像源
         export CHANGE_SOURCE="true"
-        
+
     else
         log "检测到位置在海外，禁用代理配置，禁用镜像源..."
         unset http_proxy https_proxy
@@ -273,7 +281,7 @@ map_service_name() {
 get_compose_files() {
     local environment="$1"
     local services=("${@:2}")
-    
+
     # 检查是否包含特殊组合
     for service in "${services[@]}"; do
         case "$service" in
@@ -287,7 +295,7 @@ get_compose_files() {
                 ;;
         esac
     done
-    
+
     # 标准组合
     case "$environment" in
         dev|development)
@@ -329,7 +337,7 @@ build_services() {
     local environment="$1"
     shift
     local services=("$@")
-    
+
     # MySQL服务冲突检测
     local has_mysql=false
     local has_mysql8=false
@@ -340,7 +348,7 @@ build_services() {
             has_mysql8=true
         fi
     done
-    
+
     if [[ "$has_mysql" == "true" && "$has_mysql8" == "true" ]]; then
         echo -e "${RED}❌ 检测到同时指定了 mysql 和 mysql8 服务！${NC}" >&2
         echo "" >&2
@@ -354,7 +362,7 @@ build_services() {
         echo "" >&2
         exit 1
     fi
-    
+
     # Web服务冲突检测
     local has_nginx=false
     local has_tengine=false
@@ -365,7 +373,7 @@ build_services() {
             has_tengine=true
         fi
     done
-    
+
     if [[ "$has_nginx" == "true" && "$has_tengine" == "true" ]]; then
         echo -e "${RED}❌ 检测到同时指定了 nginx 和 tengine 服务！${NC}" >&2
         echo "" >&2
@@ -379,10 +387,10 @@ build_services() {
         echo "" >&2
         exit 1
     fi
-    
+
     # 获取compose文件
     local compose_files=$(get_compose_files "$environment" "${services[@]}")
-    
+
     # 处理特殊组合
     local final_services=()
     for service in "${services[@]}"; do
@@ -397,23 +405,23 @@ build_services() {
             final_services+=($(map_service_name "$service"))
         fi
     done
-    
+
     # 构建Docker命令
     local docker_cmd="docker compose $compose_files build"
-    
+
     # 添加选项
     if [[ "$NO_CACHE" == "true" ]]; then
         docker_cmd="$docker_cmd --no-cache"
     fi
-    
+
     if [[ "$PARALLEL_BUILD" == "true" ]] && [[ ${#final_services[@]} -gt 1 ]]; then
         docker_cmd="$docker_cmd --parallel"
     fi
-    
+
     if [[ "$MULTI_ARCH" == "true" ]]; then
         docker_cmd="$docker_cmd --platform linux/amd64,linux/arm64"
     fi
-    
+
     if [[ "$FORCE_RECREATE" == "true" ]]; then
         # 如果是force-recreate，使用up命令而不是build
         docker_cmd="docker compose $compose_files up --force-recreate"
@@ -426,22 +434,22 @@ build_services() {
             docker_cmd="$docker_cmd ${final_services[*]}"
         fi
     fi
-    
+
     # 执行构建
     log "执行构建命令: $docker_cmd"
     info "构建环境: $environment"
     info "构建服务: ${final_services[*]:-所有服务}"
-    
+
     # 清屏并执行
     clear
-    
+
     # 设置Docker构建环境变量
     export DOCKER_BUILDKIT=1
     export COMPOSE_DOCKER_CLI_BUILD=1
-    
+
     # 执行命令
     eval "$docker_cmd"
-    
+
     # 推送镜像（如果需要）
     if [[ "$PUSH_IMAGE" == "true" ]]; then
         log "推送镜像到仓库..."
@@ -449,7 +457,7 @@ build_services() {
             docker compose $compose_files push "$service" || warn "推送 $service 失败"
         done
     fi
-    
+
     log "构建完成！"
 }
 
@@ -545,17 +553,17 @@ if [[ -f ".env" ]]; then
         # 跳过注释和空行
         [[ "$key" =~ ^[[:space:]]*# ]] && continue
         [[ -z "$key" ]] && continue
-        
+
         # 去掉值中的注释部分
         value=$(echo "$value" | sed 's/[[:space:]]*#.*$//')
-        
+
         # 设置环境变量
         if [[ -n "$value" ]]; then
             export "$key"="$value"
         fi
     done < <(grep -v '^[[:space:]]*#' .env | grep -v '^[[:space:]]*$')
     set -u
-    
+
     log "环境变量加载完成"
 else
     warn ".env 文件不存在，使用默认配置"
@@ -563,6 +571,10 @@ fi
 
 # 执行代理检测
 detect_and_set_proxy
+for i in {5..1}; do
+    echo -ne "${YELLOW}${BOLD}倒计时: $i 秒\r${NC}"
+    sleep 1
+done
 
 # 开始构建
 log "开始 Docker 项目构建"
@@ -576,11 +588,11 @@ build_services "$ENVIRONMENT" "${SERVICES[@]}"
 # 构建后自动清理
 if [[ "$AUTO_PRUNE" == "true" ]]; then
     log "开始构建后自动清理..."
-    
+
     # 显示清理前的磁盘使用情况
     info "清理前的Docker磁盘使用情况:"
     sudo docker system df
-    
+
     # 执行清理
     log "执行 Docker 系统清理..."
     if sudo docker system prune -f; then
@@ -588,7 +600,7 @@ if [[ "$AUTO_PRUNE" == "true" ]]; then
     else
         warn "Docker 系统清理失败，但不影响构建结果"
     fi
-    
+
     # 显示清理后的磁盘使用情况
     info "清理后的Docker磁盘使用情况:"
     sudo docker system df
@@ -597,21 +609,21 @@ fi
 # 构建后自动启动服务
 if [[ "$AUTO_UP" == "true" ]]; then
     log "开始构建后自动启动服务..."
-    
+
     # 调用up.sh脚本来启动服务
     if [[ -f "$PROJECT_DIR/up.sh" ]]; then
         local up_cmd="$PROJECT_DIR/up.sh"
-        
+
         # 添加服务名称
         for service in "${SERVICES[@]}"; do
             up_cmd+=" $service"
         done
-        
+
         # 添加环境参数
         up_cmd+=" $ENVIRONMENT"
-        
+
         log "执行启动命令: $up_cmd"
-        
+
         if ! $up_cmd; then
             warn "服务启动失败，但不影响构建结果"
         else
@@ -622,4 +634,4 @@ if [[ "$AUTO_UP" == "true" ]]; then
     fi
 fi
 
-log "所有构建任务完成！" 
+log "所有构建任务完成！"

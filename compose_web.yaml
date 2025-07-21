@@ -31,7 +31,6 @@ services:
       - "${NGINX_HTTPS_HOST_PORT}:443"
     privileged: true
     volumes:
-      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw
       - ${NGINX_VHOST_DIR}:/etc/nginx/conf/vhost/:rw
       - ${NGINX_CONF_FILE}:/etc/nginx/conf/nginx.conf:ro
       - ${NGINX_LOG_DIR}:/var/log/nginx/:rw
@@ -52,13 +51,14 @@ services:
         reservations:
           cpus: ${NGINX_RESERVATIONS_CPU:-0.25} # 默认预留0.25 CPU核心
           memory: ${NGINX_RESERVATIONS_MEMORY:-128M} # 默认预留128MB内存
-    # depends_on:
-    #   php74_apache:
-    #     condition: service_healthy
-    #   php82_apache:
-    #     condition: service_healthy
-    #   php84_apache:
-    #     condition: service_healthy
+    depends_on:
+      php74_apache:
+        condition: service_healthy
+      php82_apache:
+        condition: service_healthy
+      php84_apache:
+        condition: service_healthy
+    restart: unless-stopped  # 或 always
     networks:
       - default
 
@@ -83,7 +83,6 @@ services:
       - "${NGINX_HTTPS_HOST_PORT}:443"
     privileged: true
     volumes:
-      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw
       - ${NGINX_VHOST_DIR}:/etc/nginx/conf.d/:rw
       - ${TENGINE_CONF_FILE}:/etc/nginx/nginx.conf:ro
       - ${NGINX_LOG_DIR}:/var/log/nginx/:rw

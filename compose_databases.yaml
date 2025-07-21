@@ -17,7 +17,7 @@ services:
       dockerfile: ./build/valkey/Dockerfile
       args:
         ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
-        CHANGE_SOURCE: ${CHANGE_SOURCE}  
+        CHANGE_SOURCE: ${CHANGE_SOURCE}
         VALKEY_VERSION: ${VALKEY_VERSION}
         http_proxy: ${http_proxy}
         https_proxy: ${https_proxy}
@@ -39,6 +39,7 @@ services:
            memory: ${REDIS_LIMITS_MEMORY}
         reservations:
            memory: ${REDIS_RESERVATIONS_MEMORY}
+    restart: unless-stopped  # 或 always
     networks:
       - default
     # sysctls:
@@ -90,10 +91,10 @@ services:
 # 采用官方二进制安装包安装，根据需要选择安装指定版本的mysql;
 # 可有效避免docker仓库通过apt直接安装,因网络问题key无法下载问题。
 # 缺点：采用该方式，会导致images文件大小会偏大一点
-# 
+#
 # ⚠️  重要提示：mysql-server 和 mysql8-server 是两种不同的MySQL8安装方式
 # 请根据需要选择其中一种，不要同时启动两个服务以避免资源冲突！
-# 
+#
 # mysql-server:  使用 Dockerfile (标准安装方式)
 # mysql8-server: 使用 Dockerfile_gf (优化安装方式)
   mysql-server:
@@ -146,6 +147,7 @@ services:
            memory: ${MYSQL_LIMITS_MEMORY}
         reservations:
            memory: ${MYSQL_RESERVATIONS_MEMORY}
+    # restart: unless-stopped  # 或 always
     platform: linux/x86_64
 
   mysql8-server:
@@ -199,6 +201,7 @@ services:
            memory: ${MYSQL_LIMITS_MEMORY}
         reservations:
            memory: ${MYSQL_RESERVATIONS_MEMORY}
+    restart: unless-stopped  # 或 always
     platform: linux/x86_64
 
   db-data-mysql:

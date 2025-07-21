@@ -14,6 +14,8 @@
 *.env.bak
 .cursor
 .cursorignore
+.trae/
+.traeignore
 
 # Docker 相关文件
 .docker/

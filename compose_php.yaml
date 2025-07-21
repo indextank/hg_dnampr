@@ -17,10 +17,10 @@ x-php-common:
       max-size: "${LOG_MAX_SIZE:-50m}"
       max-file: "${LOG_MAX_FILE:-5}"
       compress: "true"
-  
+
   # 优化的健康检查配置
   healthcheck:
-    test: 
+    test:
       - "CMD"
       - "bash"
       - "-c"
@@ -38,7 +38,7 @@ x-php-common:
     timeout: 15s      # 增加超时时间
     retries: 3
     start_period: 90s # 增加启动时间，考虑编译缓存加载
-  
+
   # 资源配置优化
   deploy:
     # 更新配置
@@ -61,11 +61,11 @@ x-php-common:
       reservations:
         cpus: ${PHP_RESERVATIONS_CPU:-1}    # 增加默认CPU预留
         memory: ${PHP_RESERVATIONS_MEMORY:-1G} # 增加默认内存预留
-  
+
   # 安全配置 (在开发环境中暂时禁用以避免配置冲突)
   # security_opt:
   #   - no-new-privileges:true
-  
+
   # 限制系统调用 (在主机网络模式下禁用，避免冲突)
   # sysctls:
   #   - net.core.somaxconn=1024
@@ -85,7 +85,7 @@ services:
     << : *php-common
     container_name: php84_apache
     hostname: php84-apache
-    
+
     build:
       context: ./
       dockerfile: ./build/php/Dockerfile
@@ -95,11 +95,11 @@ services:
         PHP_VERSION: ${PHP84_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE}
         PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-        
+
         # 多架构支持
         BUILDPLATFORM: linux/amd64
         TARGETPLATFORM: linux/amd64
-        
+
         # 库版本配置
         LIBWEBP_VERSION: ${LIBWEBP_VERSION}
         XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
@@ -122,42 +122,42 @@ services:
         LIBICONV_VERSION: ${LIBICONV_VERSION}
         FREETYPE_VERSION: ${FREETYPE_VERSION}
         YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-        
+
         # 代理配置
         http_proxy: ${http_proxy}
         https_proxy: ${https_proxy}
         no_proxy: ${no_proxy}
-      
+
       # 构建参数优化
       shm_size: 512m  # 增加共享内存，加速编译
-    
+
     # 存储卷配置 (优化版)
     volumes:
       # 应用代码 (只读挂载提高安全性)
       - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
-      
+
       # 日志目录 (专用卷)
       - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
-      
+
       # 虚拟主机配置
       - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:ro,Z
-      
+
       # PHP配置
       - ${PHP84_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
-      
+
       # 缓存卷 (性能优化)
       - php_sessions:/tmp/php_sessions:rw
-      
+
       # 临时文件优化
       - type: tmpfs
         target: /tmp/php_upload
         tmpfs:
           size: 100m
-    
+
     # 端口映射
     ports:
       - "8084:88"
-    
+    restart: unless-stopped  # 或 always
     # 标签配置
     labels:
       - "traefik.enable=true"
@@ -171,7 +171,7 @@ services:
     << : *php-common
     container_name: php83_apache
     hostname: php83-apache
-    
+
     build:
       context: ./
       dockerfile: ./build/php/Dockerfile
@@ -180,11 +180,11 @@ services:
         PHP_VERSION: ${PHP83_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE}
         PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-        
+
         # 多架构支持
         BUILDPLATFORM: linux/amd64
         TARGETPLATFORM: linux/amd64
-        
+
         # 库版本配置
         LIBWEBP_VERSION: ${LIBWEBP_VERSION}
         XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
@@ -207,15 +207,15 @@ services:
         LIBICONV_VERSION: ${LIBICONV_VERSION}
         FREETYPE_VERSION: ${FREETYPE_VERSION}
         YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-        
+
         # 代理配置
         http_proxy: ${http_proxy}
         https_proxy: ${https_proxy}
         no_proxy: ${no_proxy}
-      
+
       # 构建缓存优化
       shm_size: 512m
-    
+
     volumes:
       - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
       - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
@@ -226,10 +226,10 @@ services:
         target: /tmp/php_upload
         tmpfs:
           size: 100m
-    
+
     ports:
       - "8083:88"
-    
+
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.php83.rule=Host(`php83.${DOMAIN:-localhost}`)"
@@ -242,7 +242,7 @@ services:
     << : *php-common
     container_name: php82_apache
     hostname: php82-apache
-    
+
     build:
       context: ./
       dockerfile: ./build/php/Dockerfile
@@ -251,11 +251,11 @@ services:
         PHP_VERSION: ${PHP82_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE}
         PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-        
+
         # 多架构支持
         BUILDPLATFORM: linux/amd64
         TARGETPLATFORM: linux/amd64
-        
+
         # 库版本配置 (复用相同的模式)
         LIBWEBP_VERSION: ${LIBWEBP_VERSION}
         XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
@@ -278,14 +278,14 @@ services:
         LIBICONV_VERSION: ${LIBICONV_VERSION}
         FREETYPE_VERSION: ${FREETYPE_VERSION}
         YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-        
+
         # 代理配置
         http_proxy: ${http_proxy}
         https_proxy: ${https_proxy}
         no_proxy: ${no_proxy}
 
       shm_size: 512m
-    
+
     volumes:
       - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
       - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
@@ -296,10 +296,10 @@ services:
         target: /tmp/php_upload
         tmpfs:
           size: 100m
-    
+
     ports:
       - "8082:88"
-    
+    restart: unless-stopped  # 或 always
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.php82.rule=Host(`php82.${DOMAIN:-localhost}`)"
@@ -312,7 +312,7 @@ services:
     << : *php-common
     container_name: php81_apache
     hostname: php81-apache
-    
+
     build:
       context: ./
       dockerfile: ./build/php/Dockerfile2  # 保持使用原有的Dockerfile2
@@ -342,21 +342,21 @@ services:
         LIBICONV_VERSION: ${LIBICONV_VERSION}
         FREETYPE_VERSION: ${FREETYPE_VERSION}
         YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-        
+
         http_proxy: ${http_proxy}
         https_proxy: ${https_proxy}
         no_proxy: ${no_proxy}
-    
+
     volumes:
       - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
       - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
       - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:ro,Z
       - ${PHP81_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
       - php_sessions:/tmp/php_sessions:rw
-    
+
     ports:
       - "8081:88"
-    
+
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.php81.rule=Host(`php81.${DOMAIN:-localhost}`)"
@@ -369,7 +369,7 @@ services:
     << : *php-common
     container_name: php80_apache
     hostname: php80-apache
-    
+
     build:
       context: ./
       dockerfile: ./build/php/Dockerfile2  # 保持使用原有的Dockerfile2
@@ -399,21 +399,21 @@ services:
         LIBICONV_VERSION: ${LIBICONV_VERSION}
         FREETYPE_VERSION: ${FREETYPE_VERSION}
         YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-        
+
         http_proxy: ${http_proxy}
         https_proxy: ${https_proxy}
         no_proxy: ${no_proxy}
-    
+
     volumes:
       - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
       - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
       - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:ro,Z
       - ${PHP80_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
       - php_sessions:/tmp/php_sessions:rw
-    
+
     ports:
       - "8080:88"
-    
+
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.php80.rule=Host(`php80.${DOMAIN:-localhost}`)"
@@ -426,7 +426,7 @@ services:
     << : *php-common
     container_name: php74_apache
     hostname: php74-apache
-    
+
     build:
       context: ./
       dockerfile: ./build/php/Dockerfile2  # 保持使用原有的Dockerfile2
@@ -456,21 +456,21 @@ services:
         LIBICONV_VERSION: ${LIBICONV_VERSION}
         FREETYPE_VERSION: ${FREETYPE_VERSION}
         YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-        
+
         http_proxy: ${http_proxy}
         https_proxy: ${https_proxy}
         no_proxy: ${no_proxy}
-    
+
     volumes:
       - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
       - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
       - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:ro,Z
       - ${PHP74_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
       - php_sessions:/tmp/php_sessions:rw
-    
+
     ports:
       - "8074:88"
-    
+    restart: unless-stopped  # 或 always
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.php74.rule=Host(`php74.${DOMAIN:-localhost}`)"
@@ -483,7 +483,7 @@ services:
     << : *php-common
     container_name: php72_apache
     hostname: php72-apache
-    
+
     build:
       context: ./
       dockerfile: ./build/php/Dockerfile2  # 保持使用原有的Dockerfile2
@@ -512,21 +512,21 @@ services:
         LIBICONV_VERSION: ${LIBICONV_VERSION}
         FREETYPE_VERSION: ${FREETYPE_VERSION}
         YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-        
+
         http_proxy: ${http_proxy}
         https_proxy: ${https_proxy}
         no_proxy: ${no_proxy}
-    
+
     volumes:
       - ${GLOBAL_WEB_PATH}:/var/www/html/:rw,Z
       - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache/:rw,Z
       - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled/:ro,Z
       - ${PHP72_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
       - php_sessions:/tmp/php_sessions:rw
-    
+
     ports:
       - "8072:88"
-    
+
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.php72.rule=Host(`php72.${DOMAIN:-localhost}`)"
