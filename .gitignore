@@ -170,7 +170,6 @@ grafana/data/
 prometheus/data/
 
 # 构建产物和依赖
-build/
 dist/
 out/
 target/

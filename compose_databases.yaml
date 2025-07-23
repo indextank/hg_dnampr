@@ -134,6 +134,7 @@ services:
       #- ${MYSQL_CONF_FILE}:/etc/mysql/conf.d/docker.cnf:ro
       - ${MYSQL_CONF_FILE}:/etc/mysql/my.cnf:ro
       - ${MYSQL_LOG_DIR}:/var/log/mysql
+      - ./build/mysql/init-mysql-user.sh:/docker-entrypoint-initdb.d/init-mysql-user.sh:ro
     ports:
       - "${MYSQL_HOST_PORT:-3306}:3306"  # 默认端口3306
     networks:
@@ -188,6 +189,7 @@ services:
       #- ${MYSQL_CONF_FILE}:/etc/mysql/conf.d/docker.cnf:ro
       - ${MYSQL_CONF_FILE}:/etc/mysql/my.cnf:ro
       - ${MYSQL_LOG_DIR}:/var/log/mysql
+      - ./build/mysql/init-mysql-user.sh:/docker-entrypoint-initdb.d/init-mysql-user.sh:ro
     ports:
       - "${MYSQL8_HOST_PORT:-3307}:3306"  # 使用不同的端口，默认3307
     networks:
