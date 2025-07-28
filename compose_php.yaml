@@ -20,20 +20,8 @@ x-php-common:
 
   # 优化的健康检查配置
   healthcheck:
-    test:
-      - "CMD"
-      - "bash"
-      - "-c"
-      - |
-        # 多重健康检查逻辑
-        set -e
-        # 检查Apache进程
-        pgrep apache2 > /dev/null || exit 1
-        # 检查HTTP响应
-        timeout 5 curl -f http://localhost:88/php-status >/dev/null 2>&1 || exit 1
-        # 检查PHP运行状态
-        timeout 3 php -v >/dev/null 2>&1 || exit 1
-        exit 0
+    test: ["CMD", "pgrep", "apache2"]
+    # test: ["CMD", "curl", "--fail", "--max-time", "5", "http://localhost:88/"]
     interval: 30s
     timeout: 15s      # 增加超时时间
     retries: 3

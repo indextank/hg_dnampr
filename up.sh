@@ -12,11 +12,6 @@ set -euo pipefail
 # 脚本配置
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR"
-LOG_DIR="$PROJECT_DIR/logs/up"
-LOG_FILE="$LOG_DIR/up-$(date +%Y%m%d-%H%M%S).log"
-
-# 创建日志目录
-mkdir -p "$LOG_DIR"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -30,24 +25,143 @@ NC='\033[0m' # No Color
 
 # 日志函数
 log() {
-    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOG_FILE"
+    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1"
 }
 
 warn() {
-    echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] WARNING:${NC} $1" | tee -a "$LOG_FILE"
+    echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] WARNING:${NC} $1"
 }
 
 error() {
-    echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ERROR:${NC} $1" | tee -a "$LOG_FILE" >&2
+    echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ERROR:${NC} $1"
     exit 1
 }
 
 info() {
-    echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')] INFO:${NC} $1" | tee -a "$LOG_FILE"
+    echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')] INFO:${NC} $1"
 }
 
 success() {
-    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] SUCCESS:${NC} $1" | tee -a "$LOG_FILE"
+    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] SUCCESS:${NC} $1"
+}
+
+# 配置Docker容器别名
+setup_docker_aliases() {
+    # info "配置Docker容器别名..."
+    
+    # 定义所有别名
+    local aliases=(
+        "alias dphp74='docker exec -it php74_apache /bin/bash'"
+        "alias dphp82='docker exec -it php82_apache /bin/bash'"
+        "alias dphp84='docker exec -it php84_apache /bin/bash'"
+        "alias dnginx='docker exec -it nginx /bin/bash'"
+        "alias dmysql='docker exec -it mysql /bin/bash'"
+        "alias dmysql8='docker exec -it mysql8 /bin/bash'"
+        "alias dmongo='docker exec -it mongo /bin/bash'"
+        "alias dvalkey='docker exec -it valkey /bin/bash'"
+        "alias dredis='docker exec -it redis /bin/bash'"
+        "alias dpostgres='docker exec -it postgres /bin/bash'"
+    )
+    
+    # 检测当前shell类型
+    local current_shell=""
+    local config_file=""
+    
+    # 检测WSL环境并设置正确的HOME路径
+    local user_home=""
+    if [[ -n "${WSL_DISTRO_NAME:-}" ]] || [[ "$(uname -r)" =~ microsoft|WSL ]]; then
+        # WSL环境，使用Linux用户目录
+        user_home="/home/$(whoami)"
+        info "检测到WSL环境，使用Linux用户目录: $user_home"
+    else
+        # 普通Linux环境
+        user_home="$HOME"
+    fi
+    
+    if [[ -n "${BASH_VERSION:-}" ]]; then
+        current_shell="bash"
+        config_file="$user_home/.bashrc"
+    elif [[ -n "${ZSH_VERSION:-}" ]]; then
+        current_shell="zsh"
+        config_file="$user_home/.zshrc"
+    elif [[ "$0" == *"zsh"* ]]; then
+        current_shell="zsh"
+        config_file="$user_home/.zshrc"
+    elif [[ "$0" == *"bash"* ]]; then
+        current_shell="bash"
+        config_file="$user_home/.bashrc"
+    else
+        # 尝试从环境变量检测
+        if [[ "${SHELL:-}" == *"zsh"* ]]; then
+            current_shell="zsh"
+            config_file="$user_home/.zshrc"
+        elif [[ "${SHELL:-}" == *"bash"* ]]; then
+            current_shell="bash"
+            config_file="$user_home/.bashrc"
+        else
+            current_shell="bash"
+            config_file="$user_home/.bashrc"
+        fi
+    fi
+    
+    # info "检测到shell类型: $current_shell"
+    # info "配置文件路径: $config_file"
+    
+    # 确保配置文件存在
+    if [[ ! -f "$config_file" ]]; then
+        info "配置文件不存在，创建: $config_file"
+        touch "$config_file"
+    fi
+    
+    # 检查每个别名是否已存在，不存在则添加
+    local aliases_to_add=()
+    local aliases_found=0
+    
+    for alias_line in "${aliases[@]}"; do
+        # 提取别名名称（例如从 "alias dphp74='...'" 中提取 "dphp74"）
+        local alias_name=$(echo "$alias_line" | sed -n "s/alias \([^=]*\)=.*/\1/p")
+        
+        # 检查配置文件中是否已存在该别名
+        if grep -q "^alias $alias_name=" "$config_file" 2>/dev/null; then
+            # info "别名 $alias_name 已存在，跳过"
+            aliases_found=$((aliases_found + 1))
+        else
+            aliases_to_add+=("$alias_line")
+        fi
+    done
+    
+    # 如果有需要添加的别名
+    if [[ ${#aliases_to_add[@]} -gt 0 ]]; then
+        info "添加 ${#aliases_to_add[@]} 个新别名到 $config_file"
+        
+        # 添加注释和别名
+        {
+            echo ""
+            echo "# Docker容器快捷别名 - 由 up.sh 脚本自动添加 $(date)"
+            for alias_line in "${aliases_to_add[@]}"; do
+                echo "$alias_line"
+            done
+        } >> "$config_file"
+        
+        success "成功添加 ${#aliases_to_add[@]} 个Docker别名"
+        
+        # 提示用户手动重新加载配置文件（避免脚本挂起）
+        info "别名已添加到 $config_file"
+        info "请在新的终端会话中使用这些别名，或手动执行: source $config_file"
+        
+        # 显示使用提示
+        echo ""
+        echo -e "${CYAN}=== Docker容器快捷命令 ===${NC}"
+        echo -e "${YELLOW}现在您可以使用以下命令快速进入容器：${NC}"
+        for alias_line in "${aliases_to_add[@]}"; do
+            local alias_name=$(echo "$alias_line" | sed -n "s/alias \([^=]*\)=.*/\1/p")
+            echo -e "  ${GREEN}$alias_name${NC} - 进入对应容器"
+        done
+        echo ""
+        
+    else
+        success "所有Docker别名已存在 (共 $aliases_found 个)"
+    fi
 }
 
 # 设置配置目录权限，避免容器内权限问题
@@ -80,6 +194,29 @@ setup_conf_permissions() {
         info "配置目录权限设置完成"
     else
         warn "配置目录 ./conf 不存在"
+    fi
+}
+
+# 清理日志文件函数
+cleanup_logs() {
+    info "清理日志文件..."
+    
+    local logs_dir="$PROJECT_DIR/logs"
+    
+    if [ -d "$logs_dir" ]; then
+        # 查找并删除所有 .log 文件，但保留目录
+        find "$logs_dir" -name "*.log" -type f -delete 2>/dev/null || true
+        
+        # 统计清理的文件数量
+        local cleaned_count=$(find "$logs_dir" -name "*.log" -type f 2>/dev/null | wc -l)
+        
+        if [ "$cleaned_count" -eq 0 ]; then
+            success "日志文件清理完成，共清理 $cleaned_count 个文件"
+        else
+            warn "日志文件清理完成，但仍有 $cleaned_count 个文件无法删除"
+        fi
+    else
+        warn "日志目录 $logs_dir 不存在，跳过清理"
     fi
 }
 
@@ -288,14 +425,33 @@ execute_compose_command() {
     
     # 处理特殊组合
     local final_services=()
+    local web_services=()  # 用于存储Web服务器
+    
     for service in "${services[@]}"; do
         local special_services=$(get_special_services "$service")
         if [[ -n "$special_services" ]]; then
             final_services+=($special_services)
         elif [[ "$service" != "all" ]]; then
-            final_services+=($(map_service_name "$service"))
+            local mapped_service=$(map_service_name "$service")
+            # 对于restart操作，将Web服务器单独分类
+            if [[ "$operation" == "restart" && ("$mapped_service" == "nginx" || "$mapped_service" == "tengine") ]]; then
+                web_services+=("$mapped_service")
+            else
+                final_services+=("$mapped_service")
+            fi
         fi
     done
+    
+    # 如果不是restart操作，将Web服务器重新加回到final_services
+    if [[ "$operation" != "restart" && ${#web_services[@]} -gt 0 ]]; then
+        final_services+=("${web_services[@]}")
+        web_services=()  # 清空web_services数组
+    fi
+    
+    # 提示信息
+    if [[ "$operation" == "restart" && ${#web_services[@]} -gt 0 ]]; then
+        info "检测到Web服务器 (${web_services[*]})，将在其他服务重启完成后最后重启"
+    fi
     
     # 构建Docker命令
     local docker_cmd="docker compose $compose_files"
@@ -311,7 +467,29 @@ execute_compose_command() {
             docker_cmd="$docker_cmd stop"
             ;;
         restart)
-            docker_cmd="$docker_cmd restart"
+            # 对于restart操作，如果包含Web服务器，需要分步执行
+            if [[ ${#web_services[@]} -gt 0 && ${#final_services[@]} -gt 0 ]]; then
+                # 先重启非Web服务器
+                info "步骤1: 重启其他服务 (${final_services[*]})"
+                docker_cmd="$docker_cmd restart ${final_services[*]}"
+                eval "$docker_cmd"
+                
+                # 等待一下，确保其他服务启动完成
+                info "等待其他服务启动完成..."
+                sleep 3
+                
+                # 再重启Web服务器
+                info "步骤2: 重启Web服务器 (${web_services[*]})"
+                docker_cmd="docker compose $compose_files restart ${web_services[*]}"
+                eval "$docker_cmd"
+                return  # 提前返回，避免后面重复执行
+            elif [[ ${#web_services[@]} -gt 0 && ${#final_services[@]} -eq 0 ]]; then
+                # 如果只有Web服务器，直接重启
+                info "重启Web服务器 (${web_services[*]})"
+                docker_cmd="$docker_cmd restart ${web_services[*]}"
+            else
+                docker_cmd="$docker_cmd restart"
+            fi
             ;;
         down)
             docker_cmd="$docker_cmd down"
@@ -398,14 +576,48 @@ show_status() {
     echo -e "\n${CYAN}=== 主要服务状态 ===${NC}"
     docker compose $compose_files ps 2>/dev/null || warn "无法获取主要服务状态"
     
+    # 检查ELK服务是否真的存在和运行
     echo -e "\n${CYAN}=== ELK服务状态 ===${NC}"
-    docker compose -f docker-compose-ELK.yaml ps 2>/dev/null || warn "无法获取ELK服务状态"
+    if [[ -f "docker-compose-ELK.yaml" ]]; then
+        # 检查ELK compose文件中定义的服务是否有在运行
+        local elk_containers=$(docker ps --filter "label=com.docker.compose.project=hg_dnmpr" --filter "label=com.docker.compose.config-hash" --format "{{.Names}}" | grep -E "elasticsearch|kibana|logstash" 2>/dev/null || echo "")
+        if [[ -n "$elk_containers" ]]; then
+            docker compose -f docker-compose-ELK.yaml ps 2>/dev/null
+        else
+            info "ELK服务未运行"
+        fi
+    else
+        info "ELK配置文件不存在"
+    fi
     
+    # 检查SGR服务是否真的存在和运行
     echo -e "\n${CYAN}=== SGR服务状态 ===${NC}"
-    docker compose -f docker-compose-spug+gitea+rap2.yaml ps 2>/dev/null || warn "无法获取SGR服务状态"
+    if [[ -f "docker-compose-spug+gitea+rap2.yaml" ]]; then
+        # 检查SGR compose文件中定义的服务是否有在运行
+        local sgr_containers=$(docker ps --filter "label=com.docker.compose.project=hg_dnmpr" --filter "label=com.docker.compose.config-hash" --format "{{.Names}}" | grep -E "spug|gitea|rap2" 2>/dev/null || echo "")
+        if [[ -n "$sgr_containers" ]]; then
+            docker compose -f docker-compose-spug+gitea+rap2.yaml ps 2>/dev/null
+        else
+            info "SGR服务未运行"
+        fi
+    else
+        info "SGR配置文件不存在"
+    fi
     
     echo -e "\n${CYAN}=== 系统资源使用情况 ===${NC}"
-    docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}" 2>/dev/null || warn "无法获取资源使用情况"
+    # 获取容器统计信息，同时显示容器ID和名称
+    if docker stats --no-stream --format "table {{.Container}}\t{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}" 2>/dev/null | head -1 | grep -q "CONTAINER"; then
+        # 如果docker stats支持{{.Name}}格式
+        docker stats --no-stream --format "table {{.Container}}\t{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}" 2>/dev/null || warn "无法获取资源使用情况"
+    else
+        # 如果不支持，使用替代方案：先获取容器信息，然后合并显示
+        echo -e "CONTAINER\t\tNAME\t\t\tCPU %\t\tMEM USAGE / LIMIT\tNET I/O\t\t\tBLOCK I/O"
+        docker stats --no-stream --format "{{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}" 2>/dev/null | while IFS=$'\t' read -r container cpu mem net block; do
+            # 获取容器名称
+            container_name=$(docker inspect --format '{{.Name}}' "$container" 2>/dev/null | sed 's/^\/*//')
+            printf "%-12s\t%-15s\t%-8s\t%-20s\t%-15s\t%s\n" "$container" "$container_name" "$cpu" "$mem" "$net" "$block"
+        done || warn "无法获取资源使用情况"
+    fi
 }
 
 # 参数解析
@@ -483,10 +695,15 @@ fi
 
 # 开始操作
 log "开始 Docker 项目管理"
-log "操作日志: $LOG_FILE"
 
 # 设置配置目录权限
 setup_conf_permissions
+
+# 配置Docker容器别名
+setup_docker_aliases
+
+# 清理日志文件
+cleanup_logs
 
 # 处理系统级操作
 case "$OPERATION" in
@@ -524,8 +741,51 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
         restart)
             log "重启所有服务..."
             compose_files=$(get_compose_files "$ENVIRONMENT")
-            docker compose $compose_files restart
-            success "所有服务重启完成"
+            
+            # 检查是否有运行中的Web服务器（nginx或tengine）
+            running_web_services=()
+            running_other_services=()
+            
+            # 获取所有运行中的容器名称
+            running_containers=$(docker compose $compose_files ps --format "{{.Name}}" 2>/dev/null || echo "")
+            
+            if [[ -n "$running_containers" ]]; then
+                # 分类运行中的服务
+                while IFS= read -r container_name; do
+                    if [[ "$container_name" == "nginx" || "$container_name" == "tengine" ]]; then
+                        running_web_services+=("$container_name")
+                    elif [[ -n "$container_name" ]]; then
+                        running_other_services+=("$container_name")
+                    fi
+                done <<< "$running_containers"
+                
+                # 如果有Web服务器和其他服务同时运行，分步重启
+                if [[ ${#running_web_services[@]} -gt 0 && ${#running_other_services[@]} -gt 0 ]]; then
+                    info "检测到Web服务器 (${running_web_services[*]})，将分步重启以确保服务稳定性"
+                    
+                    # 步骤1：重启其他服务
+                    info "步骤1: 重启后端服务 (${running_other_services[*]})"
+                    docker compose $compose_files restart ${running_other_services[*]}
+                    
+                    # 等待后端服务启动完成
+                    info "等待后端服务启动完成..."
+                    sleep 3
+                    
+                    # 步骤2：重启Web服务器
+                    info "步骤2: 重启Web服务器 (${running_web_services[*]})"
+                    docker compose $compose_files restart ${running_web_services[*]}
+                    
+                    success "所有服务重启完成"
+                else
+                    # 如果只有Web服务器或只有其他服务，正常重启
+                    docker compose $compose_files restart
+                    success "所有服务重启完成"
+                fi
+            else
+                # 没有运行中的服务，正常重启
+                docker compose $compose_files restart
+                success "所有服务重启完成"
+            fi
             ;;
         *)
             error "操作 '$OPERATION' 需要指定服务名"

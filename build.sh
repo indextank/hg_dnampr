@@ -50,6 +50,136 @@ success() {
     echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] SUCCESS:${NC} $1" | tee -a "$LOG_FILE"
 }
 
+# 配置Docker容器别名
+setup_docker_aliases() {
+    info "配置Docker容器别名..."
+    
+    # 定义所有别名
+    local aliases=(
+        "alias dphp74='docker exec -it php74_apache /bin/bash'"
+        "alias dphp82='docker exec -it php82_apache /bin/bash'"
+        "alias dphp84='docker exec -it php84_apache /bin/bash'"
+        "alias dnginx='docker exec -it nginx /bin/bash'"
+        "alias dmysql='docker exec -it mysql /bin/bash'"
+        "alias dmysql8='docker exec -it mysql8 /bin/bash'"
+        "alias dmongo='docker exec -it mongo /bin/bash'"
+        "alias dvalkey='docker exec -it valkey /bin/bash'"
+        "alias dredis='docker exec -it redis /bin/bash'"
+        "alias dpostgres='docker exec -it postgres /bin/bash'"
+    )
+    
+    # 检测当前shell类型
+    local current_shell=""
+    local config_file=""
+    
+    # 检测WSL环境并设置正确的HOME路径
+    local user_home=""
+    if [[ -n "${WSL_DISTRO_NAME:-}" ]] || [[ "$(uname -r)" =~ microsoft|WSL ]]; then
+        # WSL环境，使用Linux用户目录
+        user_home="/home/$(whoami)"
+        info "检测到WSL环境，使用Linux用户目录: $user_home"
+    else
+        # 普通Linux环境
+        user_home="$HOME"
+    fi
+    
+    if [[ -n "${BASH_VERSION:-}" ]]; then
+        current_shell="bash"
+        config_file="$user_home/.bashrc"
+    elif [[ -n "${ZSH_VERSION:-}" ]]; then
+        current_shell="zsh"
+        config_file="$user_home/.zshrc"
+    elif [[ "$0" == *"zsh"* ]]; then
+        current_shell="zsh"
+        config_file="$user_home/.zshrc"
+    elif [[ "$0" == *"bash"* ]]; then
+        current_shell="bash"
+        config_file="$user_home/.bashrc"
+    else
+        # 尝试从环境变量检测
+        if [[ "${SHELL:-}" == *"zsh"* ]]; then
+            current_shell="zsh"
+            config_file="$user_home/.zshrc"
+        elif [[ "${SHELL:-}" == *"bash"* ]]; then
+            current_shell="bash"
+            config_file="$user_home/.bashrc"
+        else
+            current_shell="bash"
+            config_file="$user_home/.bashrc"
+        fi
+    fi
+    
+    info "检测到shell类型: $current_shell"
+    info "配置文件路径: $config_file"
+    
+    # 确保配置文件存在
+    if [[ ! -f "$config_file" ]]; then
+        info "配置文件不存在，创建: $config_file"
+        touch "$config_file"
+    fi
+    
+    # 检查每个别名是否已存在，不存在则添加
+    local aliases_to_add=()
+    local aliases_found=0
+
+    for alias_line in "${aliases[@]}"; do
+        # 提取别名名称（例如从 "alias dphp74='...'" 中提取 "dphp74"）
+        local alias_name=$(echo "$alias_line" | sed -n "s/alias \([^=]*\)=.*/\1/p")
+        
+        # 检查配置文件中是否已存在该别名
+        if grep -q "^alias $alias_name=" "$config_file" 2>/dev/null; then
+            # info "别名 $alias_name 已存在，跳过"
+            aliases_found=$((aliases_found + 1))
+        else
+            aliases_to_add+=("$alias_line")
+        fi
+    done
+
+    # 如果有需要添加的别名
+    if [[ ${#aliases_to_add[@]} -gt 0 ]]; then
+        info "添加 ${#aliases_to_add[@]} 个新别名到 $config_file"
+        
+        # 添加注释和别名
+        {
+            echo ""
+            echo "# Docker容器快捷别名 - 由 build.sh 脚本自动添加 $(date)"
+            for alias_line in "${aliases_to_add[@]}"; do
+                echo "$alias_line"
+            done
+        } >> "$config_file"
+        
+        success "成功添加 ${#aliases_to_add[@]} 个Docker别名"
+        
+        # 尝试重新加载配置文件
+        if [[ "$current_shell" == "bash" ]]; then
+            if source "$config_file" 2>/dev/null; then
+                success "已自动加载bash配置文件"
+            else
+                warn "无法自动加载配置文件，请手动执行: source $config_file"
+            fi
+        elif [[ "$current_shell" == "zsh" ]]; then
+            if source "$config_file" 2>/dev/null; then
+                success "已自动加载zsh配置文件"
+            else
+                warn "无法自动加载配置文件，请手动执行: source $config_file"
+            fi
+        fi
+        
+        # 显示使用提示
+        echo ""
+        echo -e "${CYAN}=== Docker容器快捷命令 ===${NC}"
+        echo -e "${YELLOW}现在您可以使用以下命令快速进入容器：${NC}"
+        for alias_line in "${aliases_to_add[@]}"; do
+            local alias_name=$(echo "$alias_line" | sed -n "s/alias \([^=]*\)=.*/\1/p")
+            echo -e "  ${GREEN}$alias_name${NC} - 进入对应容器"
+        done
+        echo ""
+        
+    else
+        success "所有Docker别名已存在 (共 $aliases_found 个)"
+    fi
+}
+
 # 设置配置目录权限，避免容器内权限问题
 setup_conf_permissions() {
     info "设置配置目录权限..."
@@ -80,6 +210,29 @@ setup_conf_permissions() {
         info "配置目录权限设置完成"
     else
         warn "配置目录 ./conf 不存在"
+    fi
+}
+
+# 清理日志文件函数
+cleanup_logs() {
+    info "清理日志文件..."
+    
+    local logs_dir="$PROJECT_DIR/logs"
+    
+    if [ -d "$logs_dir" ]; then
+        # 查找并删除所有 .log 文件，但保留目录
+        find "$logs_dir" -name "*.log" -type f -delete 2>/dev/null || true
+        
+        # 统计清理的文件数量
+        local cleaned_count=$(find "$logs_dir" -name "*.log" -type f 2>/dev/null | wc -l)
+        
+        if [ "$cleaned_count" -eq 0 ]; then
+            success "日志文件清理完成，共清理 $cleaned_count 个文件"
+        else
+            warn "日志文件清理完成，但仍有 $cleaned_count 个文件无法删除"
+        fi
+    else
+        warn "日志目录 $logs_dir 不存在，跳过清理"
     fi
 }
 
@@ -135,15 +288,19 @@ EOF
 }
 
 # 从 .env 文件中获取代理配置
-if [ -n "$http_proxy" ]; then
+DEFAULT_HTTP_PROXY=""
+DEFAULT_HTTPS_PROXY=""
+DEFAULT_NO_PROXY="localhost,127.0.0.1"
+
+if [ -n "${http_proxy:-}" ]; then
     DEFAULT_HTTP_PROXY="$http_proxy"
 fi
 
-if [ -n "$https_proxy" ]; then
+if [ -n "${https_proxy:-}" ]; then
     DEFAULT_HTTPS_PROXY="$https_proxy"
 fi
 
-if [ -n "$no_proxy" ]; then
+if [ -n "${no_proxy:-}" ]; then
     DEFAULT_NO_PROXY="$no_proxy"
 fi
 
@@ -583,6 +740,12 @@ log "构建日志: $LOG_FILE"
 # 设置配置目录权限
 setup_conf_permissions
 
+# 配置Docker容器别名
+setup_docker_aliases
+
+# 清理日志文件
+cleanup_logs
+
 build_services "$ENVIRONMENT" "${SERVICES[@]}"
 
 # 构建后自动清理
@@ -612,7 +775,7 @@ if [[ "$AUTO_UP" == "true" ]]; then
 
     # 调用up.sh脚本来启动服务
     if [[ -f "$PROJECT_DIR/up.sh" ]]; then
-        local up_cmd="$PROJECT_DIR/up.sh"
+        up_cmd="$PROJECT_DIR/up.sh"
 
         # 添加服务名称
         for service in "${SERVICES[@]}"; do

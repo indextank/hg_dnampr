@@ -81,7 +81,10 @@ RUN set -eux; \
 # sub   rsa4096 2023-10-23 [E] [expires: 2025-10-22]
 	key='BCA4 3417 C3B4 85DD 128E C6D4 B7B3 B788 A8D3 785C'; \
 	export GNUPGHOME="$(mktemp -d)"; \
-	gpg --batch --keyserver keyserver.ubuntu.com --recv-keys "$key"; \
+	( gpg --batch --keyserver hkps://keys.openpgp.org --recv-keys "$key" || \
+	  gpg --batch --keyserver keyserver.ubuntu.com --recv-keys "$key" || \
+	  gpg --batch --keyserver pgp.mit.edu --recv-keys "$key" || \
+	  gpg --batch --keyserver keyserver.pgp.com --recv-keys "$key" ); \
 	mkdir -p /etc/apt/keyrings; \
 	gpg --batch --export "$key" > /etc/apt/keyrings/mysql.gpg; \
 	gpgconf --kill all; \
@@ -115,6 +118,8 @@ VOLUME /var/lib/mysql
 
 # Config files
 COPY ./conf/mysql/ /etc/mysql/
+RUN chmod 644 /etc/mysql/conf.d/*.cnf \
+    && chown root:root /etc/mysql/conf.d/*.cnf
 COPY ./build/mysql/docker-entrypoint.sh /usr/local/bin/
 # RUN ln -s usr/local/bin/docker-entrypoint.sh /entrypoint.sh # backwards compat
 # ENTRYPOINT ["docker-entrypoint.sh"]

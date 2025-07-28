@@ -23,6 +23,7 @@ RUN set -eux; \
     apt-get install -y \
     build-essential \
     wget \
+    curl \
     libpcre3 \
     libpcre3-dev \
     zlib1g \
@@ -108,23 +109,15 @@ RUN set -eux; \
     mkdir -p /etc/nginx/conf/vhost; \
     ln -sf /etc/nginx/conf/vhost /etc/nginx/conf.d; \
     \
-    # 清理构建依赖和临时文件，减小镜像体积
-     cd /; \
-     rm -rf ${TMP_DIR}/*; \
-     apt-get purge -y --auto-remove build-essential wget libpcre3-dev zlib1g-dev libssl-dev; \
-     apt-get clean; \
-     rm -rf /var/lib/apt/lists/*; \
-
-# forward request and error logs to docker log collector
-# ln -sf /dev/stdout /var/log/nginx/access.log; \
-    # ln -sf /dev/stderr /var/log/nginx/error.log; \
-# create a docker-entrypoint.d directory
-    mkdir /docker-entrypoint.d; \
+    # 清理构建依赖和临时文件，减小镜像体积（保留curl）
+    cd /; \
+    rm -rf ${TMP_DIR}/*; \
+    apt-get purge -y --auto-remove build-essential wget libpcre3-dev zlib1g-dev libssl-dev; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*; \
     \
-    apt-mark auto '.*' > /dev/null; \
-	apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
-    \
-    rm -rf ${TMP_DIR}/*
+    # 创建docker-entrypoint.d目录
+    mkdir /docker-entrypoint.d
 
 RUN { \
     echo 'proxy_connect_timeout 300s;'; \

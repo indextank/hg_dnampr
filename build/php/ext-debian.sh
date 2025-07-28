@@ -280,50 +280,148 @@ if [ -z "${EXTENSIONS##*,mongodb,*}" ]; then
 
     cd "${TMP_DIR}"
     echo "---------- Install mongodb extension ----------"
-    apt-get install -y unixodbc-dev
+    echo "PHP main version: ${php_main_version}"
+    echo "MongoDB extension version: ${MONGODB_EXT_VERSION:-auto-detect}"
+    
+    apt-get update
+    apt-get install -y unixodbc-dev libssl-dev pkg-config
 
+    # 根据 PHP 版本自动选择合适的 MongoDB 扩展版本
+    SELECTED_MONGODB_VERSION=""
+    
     if [[ "${php_main_version}" =~ ^5.[3-6]$ ]]; then
-        if [ -n "${MONGODB_EXT_VERSION}" ]; then
-            if [ ! -f mongo-1.16.16.tgz ]; then
-                wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/mongo-1.16.16.tgz
-            fi
+        # PHP 5.3-5.6: 使用旧的 mongo 扩展 (不是 mongodb)
+        echo "PHP 5.x detected, using legacy mongo extension"
+        if [ ! -f mongo-1.6.16.tgz ]; then
+            wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/mongo-1.6.16.tgz
+        fi
+        if [ -f mongo-1.6.16.tgz ]; then
             mkdir mongo \
-                && tar -xf mongo-1.16.16.tgz -C mongo --strip-components=1 \
-                && ( cd mongo && phpize && ./configure --with-php-config=/usr/local/bin/php-config && make ${MC} && make install && cd .. && rm -fr mongodb ) \
-                && docker-php-ext-enable mongo
+                && tar -xf mongo-1.6.16.tgz -C mongo --strip-components=1 \
+                && ( cd mongo && phpize && ./configure --with-php-config=/usr/local/bin/php-config && make ${MC} && make install && cd .. && rm -fr mongo ) \
+                && docker-php-ext-enable mongo \
+                && echo "Legacy mongo extension installed successfully"
+        else
+            printf "\n" | pecl install mongo
+            docker-php-ext-enable mongo
         fi
+        
     elif [[ "${php_main_version}" =~ ^7.[0]$ ]]; then
-        if [ ! -f mongodb-1.9.2.tgz ]; then
-            wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/mongodb-1.9.2.tgz
-        fi
-        mv mongodb-1.9.2.tgz mongodb.tgz
-    elif [[ "${php_main_version}" =~ ^7.[1]$ ]]; then
-        if [ ! -f mongodb-1.11.1.tgz ]; then
-            wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/mongodb-1.11.1.tgz
-        fi
-        mv mongodb-1.11.1.tgz mongodb.tgz
-    else
+        # PHP 7.0: MongoDB 1.9.2
+        echo "PHP 7.0 detected, using MongoDB extension 1.9.2"
+        SELECTED_MONGODB_VERSION="1.9.2"
+        
+    elif [[ "${php_main_version}" =~ ^7.[1-3]$ ]]; then
+        # PHP 7.1-7.3: MongoDB 1.16.2
+        echo "PHP 7.1-7.3 detected, using MongoDB extension 1.16.2"
+        SELECTED_MONGODB_VERSION="1.16.2"
+        
+    elif [[ "${php_main_version}" =~ ^7.[4]$|^8.[0]$ ]]; then
+        # PHP 7.4 和 8.0: MongoDB 1.20.0
+        echo "PHP 7.4/8.0 detected, using MongoDB extension 1.20.0"
+        SELECTED_MONGODB_VERSION="1.20.0"
+        
+    elif [[ "${php_main_version}" =~ ^8.[1-9]$ ]]; then
+        # PHP 8.1+: MongoDB 2.0.0+
+        echo "PHP 8.1+ detected, using latest MongoDB extension"
         if [ -n "${MONGODB_EXT_VERSION}" ]; then
-            if [ ! -f mongodb-${MONGODB_EXT_VERSION}.tgz ]; then
-                wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/mongodb-${MONGODB_EXT_VERSION}.tgz
-            fi
-            if [ -f mongodb-${MONGODB_EXT_VERSION}.tgz ]; then
-                mv mongodb-${MONGODB_EXT_VERSION}.tgz  mongodb.tgz
+            # 验证指定版本是否兼容
+            if [[ "${MONGODB_EXT_VERSION}" =~ ^2\. ]]; then
+                echo "Using specified MongoDB extension version: ${MONGODB_EXT_VERSION}"
+                SELECTED_MONGODB_VERSION="${MONGODB_EXT_VERSION}"
             else
-                printf "\n" | pecl install mongodb
-                docker-php-ext-enable mongodb
+                echo "Warning: MongoDB extension ${MONGODB_EXT_VERSION} may not be compatible with PHP ${php_main_version}"
+                echo "Using MongoDB extension 2.0.0 for PHP 8.1+ compatibility"
+                SELECTED_MONGODB_VERSION="2.0.0"
             fi
+        else
+            SELECTED_MONGODB_VERSION="2.0.0"
+        fi
+        
+    else
+        # 未知版本，尝试使用默认版本
+        echo "Unknown PHP version ${php_main_version}, attempting to use default MongoDB extension"
+        if [ -n "${MONGODB_EXT_VERSION}" ]; then
+            SELECTED_MONGODB_VERSION="${MONGODB_EXT_VERSION}"
         else
             printf "\n" | pecl install mongodb
             docker-php-ext-enable mongodb
         fi
     fi
 
+    # 下载并安装选定版本的 MongoDB 扩展
+    if [ -n "${SELECTED_MONGODB_VERSION}" ]; then
+        echo "Installing MongoDB extension version: ${SELECTED_MONGODB_VERSION}"
+        
+        if [ ! -f mongodb-${SELECTED_MONGODB_VERSION}.tgz ]; then
+            echo "Downloading MongoDB extension ${SELECTED_MONGODB_VERSION}..."
+            wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/mongodb-${SELECTED_MONGODB_VERSION}.tgz
+        fi
+        
+        if [ -f mongodb-${SELECTED_MONGODB_VERSION}.tgz ]; then
+            mv mongodb-${SELECTED_MONGODB_VERSION}.tgz mongodb.tgz
+        else
+            echo "Failed to download MongoDB extension ${SELECTED_MONGODB_VERSION}, trying PECL install"
+            printf "\n" | pecl install mongodb-${SELECTED_MONGODB_VERSION}
+            docker-php-ext-enable mongodb
+        fi
+    fi
+
+    # 编译和安装从源码下载的扩展
     if [ -f mongodb.tgz ]; then
-        mkdir mongodb \
-            && tar -xf mongodb.tgz -C mongodb --strip-components=1 \
-            && ( cd mongodb && phpize && ./configure --with-php-config=/usr/local/bin/php-config && make ${MC} && make install && cd .. && rm -fr mongodb ) \
-            && docker-php-ext-enable mongodb
+        echo "---------- Compiling MongoDB extension from source ----------"
+        
+        if mkdir mongodb && tar -xf mongodb.tgz -C mongodb --strip-components=1; then
+            echo "MongoDB extension extracted successfully"
+            cd mongodb
+            
+            if phpize; then
+                echo "phpize completed successfully"
+                
+                echo "Running configure..."
+                if ./configure --with-php-config=/usr/local/bin/php-config; then
+                    echo "Configure completed successfully"
+                    
+                    if make ${MC}; then
+                        echo "Make completed successfully"
+                        
+                        if make install; then
+                            echo "Make install completed successfully"
+                            cd ..
+                            rm -fr mongodb
+                            
+                            echo "Enabling MongoDB extension..."
+                            if docker-php-ext-enable mongodb; then
+                                echo "MongoDB extension installed and enabled successfully"
+                                
+                                # 验证安装
+                                if php -m | grep -q mongodb; then
+                                    echo "✅ MongoDB extension verification: SUCCESS"
+                                else
+                                    echo "❌ MongoDB extension verification: FAILED"
+                                fi
+                            else
+                                echo "ERROR: Failed to enable MongoDB extension"
+                            fi
+                        else
+                            echo "ERROR: Make install failed"
+                            cd ..
+                        fi
+                    else
+                        echo "ERROR: Make compilation failed"
+                        cd ..
+                    fi
+                else
+                    echo "ERROR: Configure failed"
+                    cd ..
+                fi
+            else
+                echo "ERROR: phpize failed"
+                cd ..
+            fi
+        else
+            echo "ERROR: Failed to extract MongoDB extension"
+        fi
     fi
 fi
 

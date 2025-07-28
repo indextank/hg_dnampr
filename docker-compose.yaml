@@ -13,6 +13,13 @@ services:
     extends:
       file: compose_web.yaml
       service: nginx-server
+    depends_on:
+      php74_apache:
+        condition: service_healthy
+      php82_apache:
+        condition: service_healthy
+      php84_apache:
+        condition: service_healthy
 
   tengine:
     extends:
@@ -118,3 +125,4 @@ volumes:
   mysql_data:
   mysql8_data:
   pgadmin:
+  php_sessions:

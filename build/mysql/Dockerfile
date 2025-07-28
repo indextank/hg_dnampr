@@ -95,8 +95,9 @@ RUN set -eux; \
 	rm -fr ${TMP_DIR}/*
 
 # Config files
-COPY ./conf/mysql/my.cnf /etc/mysql/
-COPY ./conf/mysql/conf.d/* /etc/mysql/conf.d/
+COPY ./conf/mysql/ /etc/mysql/
+RUN chmod 644 /etc/mysql/conf.d/*.cnf \
+    && chown root:root /etc/mysql/conf.d/*.cnf
 COPY ./build/mysql/docker-entrypoint.sh /usr/local/bin/
 
 RUN chmod 777 /usr/local/bin/docker-entrypoint.sh \
