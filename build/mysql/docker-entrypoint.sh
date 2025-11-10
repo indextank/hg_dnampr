@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -eo pipefail
 shopt -s nullglob
 
@@ -214,7 +214,8 @@ docker_create_db_directories() {
 # initializes the database directory
 docker_init_database_dir() {
 	mysql_note "Initializing database files"
-	"$@" --initialize-insecure --default-time-zone=SYSTEM
+	"$@" --initialize-insecure --default-time-zone=SYSTEM --autocommit=1
+	# explicitly enable autocommit to combat https://bugs.mysql.com/bug.php?id=110535 (TODO remove this when 8.0 is EOL; see https://github.com/mysql/mysql-server/commit/7dbf4f80ed15f3c925cfb2b834142f23a2de719a)
 	mysql_note "Database files initialized"
 }
 
@@ -268,10 +269,11 @@ docker_setup_db() {
 			# tell docker_process_sql to not use MYSQL_ROOT_PASSWORD since it is not set yet
 	fi
 	# Generate random root password
-	if [ -n "$MYSQL_RANDOM_ROOT_PASSWORD" ]; then
+	if [ "$MYSQL_RANDOM_ROOT_PASSWORD" = "yes" ] || [ "$MYSQL_RANDOM_ROOT_PASSWORD" = "true" ]; then
 		MYSQL_ROOT_PASSWORD="$(openssl rand -base64 24)"; export MYSQL_ROOT_PASSWORD
-		mysql_note "GENERATED ROOT PASSWORD: $MYSQL_ROOT_PASSWORD"
 	fi
+	mysql_note "🔑🔑🔑 GENERATED ROOT PASSWORD 🔑🔑🔑: $MYSQL_ROOT_PASSWORD"
+
 	# Sets root password and creates root users for non-localhost hosts
 	local rootCreate=
 	# default root to listen for connections from anywhere
@@ -287,19 +289,23 @@ docker_setup_db() {
 	local passwordSet=
 	# no, we don't care if read finds a terminating character in this heredoc (see above)
 	read -r -d '' passwordSet <<-EOSQL || true
-		ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}' ;
+		ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
+		ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
 	EOSQL
 
 	# tell docker_process_sql to not use MYSQL_ROOT_PASSWORD since it is just now being set
 	docker_process_sql --dont-use-mysql-root-password --database=mysql <<-EOSQL
+		-- enable autocommit explicitly (in case it was disabled globally)
+		SET autocommit = 1;
+
 		-- What's done in this file shouldn't be replicated
 		--  or products like mysql-fabric won't work
 		SET @@SESSION.SQL_LOG_BIN=0;
 
+		${rootCreate}
 		${passwordSet}
 		GRANT ALL ON *.* TO 'root'@'localhost' WITH GRANT OPTION ;
 		FLUSH PRIVILEGES ;
-		${rootCreate}
 		DROP DATABASE IF EXISTS test ;
 	EOSQL
 
@@ -316,8 +322,6 @@ docker_setup_db() {
 		if [ -n "$MYSQL_DATABASE" ]; then
 			mysql_note "Giving user ${MYSQL_USER} access to schema ${MYSQL_DATABASE}"
 			docker_process_sql --database=mysql <<<"GRANT ALL ON \`${MYSQL_DATABASE//_/\\_}\`.* TO '$MYSQL_USER'@'%' ;"
-		else
-			docker_process_sql --database=mysql <<<"GRANT Alter, Alter Routine, Create, Create Routine, Create Temporary Tables, Create User, Create View, Delete, Drop, Event, Execute, Index, Insert, Lock Tables, Select, Show Databases, Show View, Trigger, Super, Update ON *.* TO '$MYSQL_USER'@'%' ;"
 		fi
 
 		docker_process_sql --database=mysql <<<"flush privileges ;"

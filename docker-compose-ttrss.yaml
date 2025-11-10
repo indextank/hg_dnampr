@@ -2,11 +2,14 @@ version: '3'
 
 x-common-variables:
   &default-common
-  restart: always
-  env_file: ./.env
+  restart: unless-stopped
+  env_file:
+    - ./config/env/base.env
+    - ./config/env/database.env
+    - ./config/env/redis.env
   dns:
-    - ${DNS:-8.8.8.8}
-    - ${DNS:-223.5.5.5}
+    - ${DNS_PRIMARY:-223.5.5.5}
+    - ${DNS_SECONDARY:-114.114.114.114}
 
 services:
 
@@ -18,16 +21,16 @@ services:
     ports:
       - 8181:80 # 将冒号前的8181改成自己想要的端口
     environment:
-      - SELF_URL_PATH=http://localhost:8181 # 换成自己的ip地址
-      - PUID=1000
-      - PGID=1000
-      - DB_NAME=ttrss
-      - DB_TYPE=pgsql # type: pgsql or mysql
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=${PG_USER}
-      - DB_PASS=${PG_PASSWORD}
-      - ENABLE_PLUGINS=auth_internal,fever # auth_internal is required. Plugins enabled here will be enabled for all users as system plugins
+      SELF_URL_PATH: "http://localhost:8181" # 换成自己的ip地址
+      PUID: 1000
+      PGID: 1000
+      DB_NAME: ttrss
+      DB_TYPE: pgsql # type: pgsql or mysql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${PG_USER}
+      DB_PASS: ${PG_PASSWORD}
+      ENABLE_PLUGINS: auth_internal,fever # auth_internal is required. Plugins enabled here will be enabled for all users as system plugins
     volumes:
       - feed-icons:/var/www/feed-icons/
     networks:
@@ -88,7 +91,7 @@ services:
       NODE_ENV: production
       CACHE_TYPE: redis
       REDIS_URL: "redis://redis:${REDIS_HOST_PORT}/"
-      PUPPETEER_WS_ENDPOINT: 'ws://browserless:3333'  # marked
+      PUPPETEER_WS_ENDPOINT: "ws://browserless:3333"  # marked
     depends_on:
       - redis
       - browserless  # marked

@@ -3,7 +3,7 @@
 # ==========================================
 
 # 环境配置文件
-.env
+# .env
 .env.local
 .env.*.local
 .env.production
@@ -49,7 +49,6 @@ slow.log
 
 # 数据库相关
 mysql_data/
-mysql8_data/
 *.sql.gz
 *.sql.bak
 dump.sql

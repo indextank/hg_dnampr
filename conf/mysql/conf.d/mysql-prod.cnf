@@ -1,0 +1,183 @@
+# ==========================================
+# MySQL 8.0.43 生产环境专用配置
+# ==========================================
+# 特点：高性能、高可用、数据安全优先
+
+[mysqld]
+# ==========================================
+# 基础安全和兼容性配置
+# ==========================================
+# 禁用 NUMA 优化，解决容器环境 mbind 权限问题
+innodb_numa_interleave = 0
+
+# 认证插件配置 (MySQL 8.0+ 推荐)
+default_authentication_plugin = caching_sha2_password
+
+# SSL/TLS 配置 - 生产环境强制加密 (MySQL 8.0.43 兼容语法)
+require_secure_transport = ON
+
+# 使用现代 TLS 版本，而不是过时的 ssl = 1
+tls_version = 'TLSv1.2,TLSv1.3'
+# 注意：生产环境需要配置 SSL 证书
+# ssl_cert = /etc/mysql/ssl/server-cert.pem
+# ssl_key = /etc/mysql/ssl/server-key.pem
+# ssl_ca = /etc/mysql/ssl/ca-cert.pem
+
+# ==========================================
+# 生产环境高性能配置
+# ==========================================
+# InnoDB 缓冲池 - 生产环境使用大量内存
+innodb_buffer_pool_size = 4G
+innodb_buffer_pool_instances = 4
+
+# 日志配置 - 生产环境数据安全优先
+# 使用新的 MySQL 8.0 推荐参数替代废弃的 innodb_log_file_size
+innodb_redo_log_capacity = 1G
+innodb_log_buffer_size = 64M
+innodb_flush_log_at_trx_commit = 1
+innodb_flush_method = O_DIRECT
+innodb_doublewrite = 1
+
+# ==========================================
+# 连接和并发配置
+# ==========================================
+max_connections = 500
+max_connect_errors = 100000
+connect_timeout = 10
+wait_timeout = 28800
+interactive_timeout = 28800
+
+# 连接池配置
+thread_cache_size = 50
+thread_stack = 256K
+
+# ==========================================
+# 二进制日志配置 - 生产环境完整配置
+# ==========================================
+binlog_expire_logs_seconds = 604800
+
+log_bin = mysql-bin
+# 注意：binlog_format 在 MySQL 8.0.34+ 中被标记为废弃
+# 建议在应用程序中通过会话设置：SET SESSION binlog_format = 'ROW';
+# binlog_format = ROW
+max_binlog_size = 1G
+sync_binlog = 1
+
+# GTID 配置 (用于复制)
+gtid_mode = ON
+enforce_gtid_consistency = ON
+
+# 使用新的语法替代过时的 log_slave_updates
+log_replica_updates = 1
+binlog_checksum = CRC32
+
+# ==========================================
+# 错误和慢查询日志 - 生产环境适度记录
+# ==========================================
+log_error = /var/log/mysql/error.log
+log_error_verbosity = 2
+
+# 慢查询日志 - 生产环境关注性能
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/slow.log
+long_query_time = 2.0
+log_queries_not_using_indexes = 0
+
+# ==========================================
+# 字符集和排序规则
+# ==========================================
+character_set_server = utf8mb4
+collation_server = utf8mb4_unicode_ci
+init_connect = 'SET NAMES utf8mb4'
+
+# ==========================================
+# 生产环境安全配置
+# ==========================================
+# 通用查询日志 - 生产环境关闭
+general_log = 0
+
+# 严格安全配置
+local_infile = 0
+
+# 安全文件操作路径（解决 secure-file-priv 警告）
+secure_file_priv = "/var/lib/mysql-files"
+
+# PID 文件安全路径（解决 pid-file 警告）
+pid_file = /var/lib/mysql/mysql.pid
+
+# 严格 SQL 模式 (MySQL 8.0.43 兼容)
+# 移除了已废弃的 NO_AUTO_CREATE_USER
+sql_mode = STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+
+# ==========================================
+# 高性能表和索引配置
+# ==========================================
+innodb_file_per_table = 1
+innodb_open_files = 10000
+table_open_cache = 8000
+table_definition_cache = 4000
+
+# ==========================================
+# 生产环境内存优化
+# ==========================================
+tmp_table_size = 256M
+max_heap_table_size = 256M
+sort_buffer_size = 4M
+read_buffer_size = 1M
+read_rnd_buffer_size = 2M
+join_buffer_size = 4M
+
+# ==========================================
+# InnoDB 高级配置
+# ==========================================
+innodb_thread_concurrency = 0
+innodb_read_io_threads = 8
+innodb_write_io_threads = 8
+innodb_io_capacity = 2000
+innodb_io_capacity_max = 4000
+
+# 锁配置
+innodb_lock_wait_timeout = 50
+innodb_rollback_on_timeout = 1
+innodb_print_all_deadlocks = 1
+
+# ==========================================
+# 复制配置 (主从复制)
+# ==========================================
+server_id = 1
+report_host = mysql-master
+auto_increment_increment = 1
+auto_increment_offset = 1
+
+# 从服务器配置
+# relay_log = mysql-relay-bin
+# read_only = 1
+
+# ==========================================
+# 监控和性能配置
+# ==========================================
+# Performance Schema 配置
+performance_schema = ON
+performance_schema_max_table_instances = 12500
+performance_schema_max_table_handles = 4000
+
+# 主机缓存配置（替代废弃的 skip_name_resolve 和 skip-host-cache）
+skip_name_resolve = 1
+host_cache_size = 0
+
+# ==========================================
+# 其他生产环境优化
+# ==========================================
+# 外键检查设置（MySQL 8.0 默认启用，无需显式设置）
+# foreign_key_checks = 1
+
+# 事务隔离级别
+transaction_isolation = REPEATABLE-READ
+
+[mysql]
+# 客户端配置
+default_character_set = utf8mb4
+
+[client]
+# 客户端默认字符集
+default_character_set = utf8mb4

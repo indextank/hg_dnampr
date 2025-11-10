@@ -1,0 +1,31 @@
+## JVM configuration for Logstash
+
+# Xms represents the initial size of total heap space
+# Xmx represents the maximum size of total heap space
+
+-Xms256m
+-Xmx512m
+
+# 优化垃圾回收
+-XX:+UseG1GC
+-XX:MaxGCPauseMillis=200
+-XX:G1HeapRegionSize=16m
+
+# 减少内存占用
+-XX:+UseCompressedOops
+-XX:+UseCompressedClassPointers
+
+# 禁用不必要的功能
+-Djava.awt.headless=true
+-Dfile.encoding=UTF-8
+
+# 网络优化
+-Djava.net.preferIPv4Stack=true
+
+# 日志配置
+-Dlog4j2.formatMsgNoLookups=true
+
+# 性能监控（可选）
+# -XX:+PrintGCDetails
+# -XX:+PrintGCTimeStamps
+# -Xloggc:/usr/share/logstash/logs/gc.log

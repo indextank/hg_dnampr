@@ -18,7 +18,8 @@ RUN set -eux; \
 		sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list; \
 	fi; \
 	\
-  apt-get update; \
+  # 使用重试机制更新软件源
+  apt-get update --fix-missing || (sleep 5 && apt-get update --fix-missing) || apt-get update; \
   DEBIAN_FRONTEND=noninteractive apt-get install -y wget
 
 COPY ./src/elk/kibana ${TMP_DIR}
@@ -71,7 +72,7 @@ RUN set -eux; \
     fi; \
     \
     export DEBIAN_FRONTEND=noninteractive; \
-    apt-get update; \
+    apt-get update --fix-missing || (sleep 5 && apt-get update --fix-missing) || apt-get update; \
     apt-get upgrade -y; \
     apt-get install -y --no-install-recommends fontconfig fonts-liberation libnss3 libfontconfig1 ca-certificates curl; \
     apt-get clean; \

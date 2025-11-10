@@ -1,10 +1,13 @@
 x-common-variables:
   &default-common
-  restart: always
-  env_file: ./.env
+  restart: unless-stopped
+  env_file:
+    - ./config/env/base.env
+    - ./config/env/apps.env
+    - ./config/env/database.env
   dns:
-    - ${DNS:-8.8.8.8}
-    - ${DNS:-114.114.114.114}
+    - ${DNS_PRIMARY:-223.5.5.5}
+    - ${DNS_SECONDARY:-114.114.114.114}
 
 services:
 
@@ -21,11 +24,11 @@ services:
       # 如果80端口被占用可替换为其他端口，例如: - "8000:80"
       - "${SPUG_PORT}:80"
     environment:
-      - MYSQL_DATABASE=${SPUG_DB_DATABASE}
-      - MYSQL_USER=${SPUG_DB_USER}
-      - MYSQL_PASSWORD=${SPUG_DB_PASSWORD}
-      - MYSQL_HOST=${SPUG_DB_ENGINE}
-      - MYSQL_PORT=${SPUG_DB_PORT}
+      MYSQL_DATABASE: ${SPUG_DB_DATABASE}
+      MYSQL_USER: ${SPUG_DB_USER}
+      MYSQL_PASSWORD: ${SPUG_DB_PASSWORD}
+      MYSQL_HOST: ${SPUG_DB_ENGINE}
+      MYSQL_PORT: ${SPUG_DB_PORT}
     deploy:
       resources:
           limits:
@@ -45,13 +48,13 @@ services:
     image: gitea/gitea:latest
     container_name: gitea
     environment:
-      - USER_UID=1000
-      - USER_GID=1000
-      - GITEA__database__DB_TYPE=${GITEA_DB_ENGINE}
-      - GITEA__database__HOST=${GITEA_DB_ENGINE}:${GITEA_DB_PORT}
-      - GITEA__database__NAME=${GITEA_DB_DATABASE}
-      - GITEA__database__USER=${GITEA_DB_USER}
-      - GITEA__database__PASSWD=${GITEA_DB_PASSWORD}
+      USER_UID: 1000
+      USER_GID: 1000
+      GITEA__database__DB_TYPE: ${GITEA_DB_ENGINE}
+      GITEA__database__HOST: ${GITEA_DB_ENGINE}:${GITEA_DB_PORT}
+      GITEA__database__NAME: ${GITEA_DB_DATABASE}
+      GITEA__database__USER: ${GITEA_DB_USER}
+      GITEA__database__PASSWD: ${GITEA_DB_PASSWORD}
     networks:
       - lnamp_network
     volumes:
@@ -81,18 +84,18 @@ services:
       # 这里的配置不要改哦
       - 38080:38080
     environment:
-      - SERVE_PORT=38080
+      SERVE_PORT: 38080
       # if you have your own mysql, config it here, and disable the 'mysql' config blow
-      - MYSQL_URL=mysql # links will maintain /etc/hosts, just use 'container_name'
-      - MYSQL_PORT=${MYSQL_HOST_PORT}
-      - MYSQL_USERNAME=${RAP2_MYSQL_USER}
-      - MYSQL_PASSWD=${RAP2_MYSQL_PASSWORD}
-      - MYSQL_SCHEMA=${RAP2_MYSQL_SCHEMA}
+      MYSQL_URL: mysql # links will maintain /etc/hosts, just use 'container_name'
+      MYSQL_PORT: ${MYSQL_HOST_PORT}
+      MYSQL_USERNAME: ${RAP2_MYSQL_USER}
+      MYSQL_PASSWD: ${RAP2_MYSQL_PASSWORD}
+      MYSQL_SCHEMA: ${RAP2_MYSQL_SCHEMA}
       # redis config
-      - REDIS_URL=redis
-      - REDIS_PORT=${REDIS_HOST_PORT}
+      REDIS_URL: redis
+      REDIS_PORT: ${REDIS_HOST_PORT}
       # production / development
-      - NODE_ENV=production
+      NODE_ENV: production
     networks:
         - lnamp_network
     ###### 'sleep 30 && node scripts/init' will drop the tables

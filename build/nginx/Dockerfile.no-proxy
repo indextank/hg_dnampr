@@ -1,0 +1,97 @@
+# 使用debian:bookworm-slim作为基础镜像
+FROM debian:bookworm-slim
+
+ARG NGINX_VERSION=1.24.0
+ARG HMNM_VERSION=0.37
+ARG OPENSSL_VERSION=3.0.9
+ARG PCRE_VERSION=8.45
+
+ENV TMP_DIR=/tmp/extensions
+
+# 不更换源，使用官方源
+RUN set -eux; \
+    apt-get update && \
+    apt-get install -y \
+    build-essential \
+    wget \
+    curl \
+    libpcre3 \
+    libpcre3-dev \
+    zlib1g \
+    zlib1g-dev \
+    libssl-dev \
+    gnupg \
+    ca-certificates \
+    vim && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY ./src/nginx/ ${TMP_DIR}
+WORKDIR ${TMP_DIR}
+
+ENV RUN_USER=nginx
+
+RUN set -eux; \
+    # 创建nginx用户和组
+    groupadd --system --gid 101 ${RUN_USER}; \
+    useradd --system --gid ${RUN_USER} --no-create-home --home /nonexistent --comment "nginx user" --shell /bin/false --uid 101 ${RUN_USER}; \
+    \
+    export MC="-j$(nproc)"; \
+    \
+    cd ${TMP_DIR}; \
+    \
+    # 下载所需的源码包
+    if [ ! -f "nginx-${NGINX_VERSION}.tar.gz" ]; then \
+        curl -L "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o nginx-${NGINX_VERSION}.tar.gz || \
+        wget "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"; \
+    fi; \
+    \
+    # 简化构建过程，只进行基本配置
+    tar xzf nginx-${NGINX_VERSION}.tar.gz; \
+    cd nginx-${NGINX_VERSION}; \
+    \
+    # 基本配置
+    ./configure --prefix=/etc/nginx \
+                --user=${RUN_USER} \
+                --group=${RUN_USER} \
+                --with-http_stub_status_module \
+                --with-http_ssl_module; \
+    make ${MC}; \
+    make install; \
+    \
+    # 清理
+    cd /; \
+    rm -rf ${TMP_DIR}/*; \
+    \
+    # 创建必要目录
+    mkdir -p /var/log/nginx /var/cache/nginx /etc/nginx/conf.d; \
+    chown -R ${RUN_USER}:${RUN_USER} /var/log/nginx /var/cache/nginx; \
+    \
+    # 创建基本配置
+    echo 'user nginx;' > /etc/nginx/nginx.conf; \
+    echo 'worker_processes auto;' >> /etc/nginx/nginx.conf; \
+    echo 'error_log /var/log/nginx/error.log;' >> /etc/nginx/nginx.conf; \
+    echo 'pid /run/nginx.pid;' >> /etc/nginx/nginx.conf; \
+    echo 'events { worker_connections 1024; }' >> /etc/nginx/nginx.conf; \
+    echo 'http {' >> /etc/nginx/nginx.conf; \
+    echo '  include /etc/nginx/mime.types;' >> /etc/nginx/nginx.conf; \
+    echo '  default_type application/octet-stream;' >> /etc/nginx/nginx.conf; \
+    echo '  sendfile on;' >> /etc/nginx/nginx.conf; \
+    echo '  tcp_nopush on;' >> /etc/nginx/nginx.conf; \
+    echo '  keepalive_timeout 65;' >> /etc/nginx/nginx.conf; \
+    echo '  server {' >> /etc/nginx/nginx.conf; \
+    echo '    listen 80;' >> /etc/nginx/nginx.conf; \
+    echo '    server_name localhost;' >> /etc/nginx/nginx.conf; \
+    echo '    location / {' >> /etc/nginx/nginx.conf; \
+    echo '      root /usr/share/nginx/html;' >> /etc/nginx/nginx.conf; \
+    echo '      index index.html;' >> /etc/nginx/nginx.conf; \
+    echo '    }' >> /etc/nginx/nginx.conf; \
+    echo '  }' >> /etc/nginx/nginx.conf; \
+    echo '}' >> /etc/nginx/nginx.conf; \
+    \
+    # 创建默认页面
+    mkdir -p /usr/share/nginx/html; \
+    echo '<h1>Welcome to nginx!</h1>' > /usr/share/nginx/html/index.html
+
+EXPOSE 80
+
+CMD ["/etc/nginx/sbin/nginx", "-g", "daemon off;"]

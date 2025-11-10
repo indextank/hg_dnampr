@@ -85,6 +85,9 @@ services:
         max-file: "3"
 
   redis:
+    extends:
+      file: compose_databases.yaml
+      service: redis-server
     deploy:
       replicas: ${REDIS_PROD_REPLICAS:-2}
       update_config:
@@ -105,6 +108,9 @@ services:
         max-file: "3"
 
   mongo:
+    extends:
+      file: compose_databases.yaml
+      service: mongo-server
     deploy:
       replicas: ${MONGO_PROD_REPLICAS:-1} # MongoDB副本集通常通过其自身机制管理，Compose中常为1
       update_config:
@@ -126,6 +132,9 @@ services:
         max-file: "5"      # 建议值：5-10个文件
 
   mysql:
+    extends:
+      file: compose_databases.yaml
+      service: mysql-server
     deploy:
       replicas: ${MYSQL_PROD_REPLICAS:-1} # MySQL主从/集群通常有其自身管理方式
       update_config:
@@ -145,37 +154,34 @@ services:
         # 生产日志配置（WARN级别）
         max-size: "100m"  # 建议值：100-500MB
         max-file: "5"      # 建议值：5-10个文件
-
-  mysql8:
+  mysql-backup:
+    extends:
+      file: compose_databases.yaml
+      service: mysql-backup
     deploy:
-      replicas: ${MYSQL8_PROD_REPLICAS:-1}
+      replicas: ${MYSQL_BACKUP_PROD_REPLICAS:-1} # 备份服务通常单副本即可
       update_config:
         parallelism: 1
-        delay: 30s
+        delay: 30s # 备份服务更新应更谨慎
         order: start-first
       resources:
         limits:
-          cpus: ${MYSQL8_PROD_LIMITS_CPU:-1}
-          memory: ${MYSQL8_PROD_LIMITS_MEMORY:-2G}
+          cpus: ${MYSQL_BACKUP_PROD_LIMITS_CPU:-0.5}
+          memory: ${MYSQL_BACKUP_PROD_LIMITS_MEMORY:-512M}
         reservations:
-          cpus: ${MYSQL8_PROD_RESERVATIONS_CPU:-0.5}
-          memory: ${MYSQL8_PROD_RESERVATIONS_MEMORY:-1G}
+          cpus: ${MYSQL_BACKUP_PROD_RESERVATIONS_CPU:-0.1}
+          memory: ${MYSQL_BACKUP_PROD_RESERVATIONS_MEMORY:-128M}
     logging:
       driver: "json-file"
       options:
         # 生产日志配置（WARN级别）
-        max-size: "100m"  # 建议值：100-500MB
-        max-file: "5"      # 建议值：5-10个文件
-
-  db-data-mysql:
-    # 数据卷容器通常不需要副本或资源限制，但可以配置日志
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "1m"
-        max-file: "1"
+        max-size: "50m"   # 建议值：50-100MB
+        max-file: "5"     # 建议值：5-10个文件
 
   postgres:
+    extends:
+      file: compose_databases.yaml
+      service: postgres-server
     deploy:
       replicas: ${POSTGRES_PROD_REPLICAS:-1}
       update_config:
@@ -197,6 +203,9 @@ services:
         max-file: "5"      # 建议值：5-10个文件
 
   pgadmin:
+    extends:
+      file: compose_databases.yaml
+      service: pgadmin-server
     deploy:
       replicas: 1 # pgAdmin通常单副本即可
       resources:
@@ -213,6 +222,9 @@ services:
         max-file: "3"
 
   php84_apache:
+    extends:
+      file: compose_php.yaml
+      service: php84_apache
     deploy:
       replicas: ${PHP_PROD_REPLICAS:-3}
       update_config:
@@ -234,6 +246,9 @@ services:
         max-file: "5"      # 建议值：5-10个文件
 
   php83_apache:
+    extends:
+      file: compose_php.yaml
+      service: php83_apache
     deploy:
       replicas: ${PHP_PROD_REPLICAS:-3}
       update_config:
@@ -255,6 +270,9 @@ services:
         max-file: "5"      # 建议值：5-10个文件
 
   php82_apache:
+    extends:
+      file: compose_php.yaml
+      service: php82_apache
     deploy:
       replicas: ${PHP_PROD_REPLICAS:-3}
       update_config:
@@ -276,6 +294,9 @@ services:
         max-file: "5"      # 建议值：5-10个文件
 
   php81_apache:
+    extends:
+      file: compose_php.yaml
+      service: php81_apache
     deploy:
       replicas: ${PHP_PROD_REPLICAS:-3}
       update_config:
@@ -297,6 +318,9 @@ services:
         max-file: "5"      # 建议值：5-10个文件
 
   php80_apache:
+    extends:
+      file: compose_php.yaml
+      service: php80_apache
     deploy:
       replicas: ${PHP_PROD_REPLICAS:-3}
       update_config:
@@ -318,6 +342,9 @@ services:
         max-file: "5"      # 建议值：5-10个文件
 
   php74_apache:
+    extends:
+      file: compose_php.yaml
+      service: php74_apache
     deploy:
       replicas: ${PHP_PROD_REPLICAS:-3}
       update_config:
@@ -339,6 +366,9 @@ services:
         max-file: "5"      # 建议值：5-10个文件
 
   php72_apache:
+    extends:
+      file: compose_php.yaml
+      service: php72_apache
     deploy:
       replicas: ${PHP_PROD_REPLICAS:-3}
       update_config:
@@ -366,4 +396,6 @@ volumes:
   mysql_data:
     driver: local
   pgadmin:
+    driver: local
+  php_sessions:
     driver: local

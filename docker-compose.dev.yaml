@@ -135,18 +135,18 @@ services:
         max-size: "10m"  # 建议值：10-50MB
         max-file: "3"    # 建议值：3-5个文件
 
-  mysql8:
+  mysql-backup:
     extends:
       file: compose_databases.yaml
-      service: mysql8-server
+      service: mysql-backup
     deploy:
       # 开发环境保持单副本，避免资源浪费
       # 建议值范围：1-2（本地多服务联调时可临时调整）
       replicas: 1
       resources:
         reservations:
-          cpus: ${MYSQL8_DEV_RESERVATIONS_CPU:-0.1}
-          memory: ${MYSQL8_DEV_RESERVATIONS_MEMORY:-256M}
+          cpus: ${MYSQL_BACKUP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${MYSQL_BACKUP_DEV_RESERVATIONS_MEMORY:-64M}
     logging:
       # 开发日志配置（DEBUG级别）
       # max-size - 单个日志文件最大尺寸
@@ -155,17 +155,6 @@ services:
       options:
         max-size: "10m"  # 建议值：10-50MB
         max-file: "3"    # 建议值：3-5个文件
-
-  db-data-mysql:
-    extends:
-      file: compose_databases.yaml
-      service: db-data-mysql
-    # 通常数据卷容器不需要副本或资源限制，但可以配置日志
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "1m"
-        max-file: "1"
 
   postgres:
     extends:

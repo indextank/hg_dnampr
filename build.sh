@@ -12,296 +12,64 @@ set -euo pipefail
 # 脚本配置
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR"
-LOG_DIR="$PROJECT_DIR/logs/build"
-LOG_FILE="$LOG_DIR/build-$(date +%Y%m%d-%H%M%S).log"
 
-# 创建日志目录
-mkdir -p "$LOG_DIR"
+# 引入公共函数库
+source "$SCRIPT_DIR/scripts/common_functions.sh"
 
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
-
-# 日志函数
-log() {
-    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOG_FILE"
-}
-
-warn() {
-    echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] WARNING:${NC} $1" | tee -a "$LOG_FILE"
-}
-
-error() {
-    echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ERROR:${NC} $1" | tee -a "$LOG_FILE" >&2
-    exit 1
-}
-
-info() {
-    echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')] INFO:${NC} $1" | tee -a "$LOG_FILE"
-}
-
-success() {
-    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] SUCCESS:${NC} $1" | tee -a "$LOG_FILE"
-}
-
-# 配置Docker容器别名
-setup_docker_aliases() {
-    info "配置Docker容器别名..."
-    
-    # 定义所有别名
-    local aliases=(
-        "alias dphp74='docker exec -it php74_apache /bin/bash'"
-        "alias dphp82='docker exec -it php82_apache /bin/bash'"
-        "alias dphp84='docker exec -it php84_apache /bin/bash'"
-        "alias dnginx='docker exec -it nginx /bin/bash'"
-        "alias dmysql='docker exec -it mysql /bin/bash'"
-        "alias dmysql8='docker exec -it mysql8 /bin/bash'"
-        "alias dmongo='docker exec -it mongo /bin/bash'"
-        "alias dvalkey='docker exec -it valkey /bin/bash'"
-        "alias dredis='docker exec -it redis /bin/bash'"
-        "alias dpostgres='docker exec -it postgres /bin/bash'"
-    )
-    
-    # 检测当前shell类型
-    local current_shell=""
-    local config_file=""
-    
-    # 检测WSL环境并设置正确的HOME路径
-    local user_home=""
-    if [[ -n "${WSL_DISTRO_NAME:-}" ]] || [[ "$(uname -r)" =~ microsoft|WSL ]]; then
-        # WSL环境，使用Linux用户目录
-        user_home="/home/$(whoami)"
-        info "检测到WSL环境，使用Linux用户目录: $user_home"
-    else
-        # 普通Linux环境
-        user_home="$HOME"
-    fi
-    
-    if [[ -n "${BASH_VERSION:-}" ]]; then
-        current_shell="bash"
-        config_file="$user_home/.bashrc"
-    elif [[ -n "${ZSH_VERSION:-}" ]]; then
-        current_shell="zsh"
-        config_file="$user_home/.zshrc"
-    elif [[ "$0" == *"zsh"* ]]; then
-        current_shell="zsh"
-        config_file="$user_home/.zshrc"
-    elif [[ "$0" == *"bash"* ]]; then
-        current_shell="bash"
-        config_file="$user_home/.bashrc"
-    else
-        # 尝试从环境变量检测
-        if [[ "${SHELL:-}" == *"zsh"* ]]; then
-            current_shell="zsh"
-            config_file="$user_home/.zshrc"
-        elif [[ "${SHELL:-}" == *"bash"* ]]; then
-            current_shell="bash"
-            config_file="$user_home/.bashrc"
-        else
-            current_shell="bash"
-            config_file="$user_home/.bashrc"
-        fi
-    fi
-    
-    info "检测到shell类型: $current_shell"
-    info "配置文件路径: $config_file"
-    
-    # 确保配置文件存在
-    if [[ ! -f "$config_file" ]]; then
-        info "配置文件不存在，创建: $config_file"
-        touch "$config_file"
-    fi
-    
-    # 检查每个别名是否已存在，不存在则添加
-    local aliases_to_add=()
-    local aliases_found=0
-
-    for alias_line in "${aliases[@]}"; do
-        # 提取别名名称（例如从 "alias dphp74='...'" 中提取 "dphp74"）
-        local alias_name=$(echo "$alias_line" | sed -n "s/alias \([^=]*\)=.*/\1/p")
-        
-        # 检查配置文件中是否已存在该别名
-        if grep -q "^alias $alias_name=" "$config_file" 2>/dev/null; then
-            # info "别名 $alias_name 已存在，跳过"
-            aliases_found=$((aliases_found + 1))
-        else
-            aliases_to_add+=("$alias_line")
-        fi
-    done
-
-    # 如果有需要添加的别名
-    if [[ ${#aliases_to_add[@]} -gt 0 ]]; then
-        info "添加 ${#aliases_to_add[@]} 个新别名到 $config_file"
-        
-        # 添加注释和别名
-        {
-            echo ""
-            echo "# Docker容器快捷别名 - 由 build.sh 脚本自动添加 $(date)"
-            for alias_line in "${aliases_to_add[@]}"; do
-                echo "$alias_line"
-            done
-        } >> "$config_file"
-        
-        success "成功添加 ${#aliases_to_add[@]} 个Docker别名"
-        
-        # 尝试重新加载配置文件
-        if [[ "$current_shell" == "bash" ]]; then
-            if source "$config_file" 2>/dev/null; then
-                success "已自动加载bash配置文件"
-            else
-                warn "无法自动加载配置文件，请手动执行: source $config_file"
-            fi
-        elif [[ "$current_shell" == "zsh" ]]; then
-            if source "$config_file" 2>/dev/null; then
-                success "已自动加载zsh配置文件"
-            else
-                warn "无法自动加载配置文件，请手动执行: source $config_file"
-            fi
-        fi
-        
-        # 显示使用提示
-        echo ""
-        echo -e "${CYAN}=== Docker容器快捷命令 ===${NC}"
-        echo -e "${YELLOW}现在您可以使用以下命令快速进入容器：${NC}"
-        for alias_line in "${aliases_to_add[@]}"; do
-            local alias_name=$(echo "$alias_line" | sed -n "s/alias \([^=]*\)=.*/\1/p")
-            echo -e "  ${GREEN}$alias_name${NC} - 进入对应容器"
-        done
-        echo ""
-        
-    else
-        success "所有Docker别名已存在 (共 $aliases_found 个)"
-    fi
-}
-
-# 设置配置目录权限，避免容器内权限问题
-setup_conf_permissions() {
-    info "设置配置目录权限..."
-
-    # 确保conf目录存在并设置权限
-    if [ -d "./conf" ]; then
-        # 设置目录权限为755，文件权限为644
-        find ./conf -type d -exec chmod 755 {} \; 2>/dev/null || true
-        find ./conf -type f -exec chmod 644 {} \; 2>/dev/null || true
-
-        # 特别处理logstash配置文件，需要写权限
-        if [ -d "./conf/logstash" ]; then
-            chmod -R 777 ./conf/logstash 2>/dev/null || true
-            # find ./conf/logstash -name "*.yml" -exec chmod 664 {} \; 2>/dev/null || true
-            # find ./conf/logstash -name "*.properties" -exec chmod 664 {} \; 2>/dev/null || true
-        fi
-
-        # 设置elasticsearch配置权限
-        if [ -d "./conf/elasticsearch" ]; then
-            chmod -R 755 ./conf/elasticsearch 2>/dev/null || true
-        fi
-
-        # 设置kibana配置权限
-        if [ -d "./conf/kibana" ]; then
-            chmod -R 755 ./conf/kibana 2>/dev/null || true
-        fi
-
-        info "配置目录权限设置完成"
-    else
-        warn "配置目录 ./conf 不存在"
-    fi
-}
-
-# 清理日志文件函数
-cleanup_logs() {
-    info "清理日志文件..."
-    
-    local logs_dir="$PROJECT_DIR/logs"
-    
-    if [ -d "$logs_dir" ]; then
-        # 查找并删除所有 .log 文件，但保留目录
-        find "$logs_dir" -name "*.log" -type f -delete 2>/dev/null || true
-        
-        # 统计清理的文件数量
-        local cleaned_count=$(find "$logs_dir" -name "*.log" -type f 2>/dev/null | wc -l)
-        
-        if [ "$cleaned_count" -eq 0 ]; then
-            success "日志文件清理完成，共清理 $cleaned_count 个文件"
-        else
-            warn "日志文件清理完成，但仍有 $cleaned_count 个文件无法删除"
-        fi
-    else
-        warn "日志目录 $logs_dir 不存在，跳过清理"
-    fi
-}
-
-# 显示使用帮助
-show_help() {
-    cat << EOF
-${CYAN}Docker 项目构建脚本 v2.0${NC}
-
-${YELLOW}使用方法:${NC}
-    $0 [服务名...] [环境] [选项]
-
-${YELLOW}服务名:${NC}
-    php84, php83, php82, php81, php80, php74, php72  - PHP服务
-    nginx, tengine                                    - Web服务器 ⚠️ 二选一
-    mysql8, mysql                                   - MySQL数据库 ⚠️ 二选一
-    redis, valkey                                     - 缓存服务
-    mongo, postgresql                                 - 其他数据库
-    elk                                              - ELK栈 (elasticsearch, kibana, logstash)
-    sgr                                              - Spug+Gitea+Rap2栈
-    all                                              - 所有服务
-
-${YELLOW}环境类型:${NC}
-    dev, development    - 开发环境 (默认)
-    prod, production    - 生产环境
-    test, testing       - 测试环境
-
-${YELLOW}选项:${NC}
-    --no-cache         不使用构建缓存
-    --parallel         并行构建 (默认启用)
-    --no-parallel      禁用并行构建
-    --multi-arch       多架构构建 (linux/amd64,linux/arm64)
-    --push             构建完成后推送到镜像仓库
-    --force-recreate   强制重新创建容器
-    --auto-prune       构建后自动清理
-    --auto-up          构建后自动启动服务
-    --help, -h         显示此帮助信息
-
-${YELLOW}示例:${NC}
-    $0 php84 dev                                    # 构建PHP84开发环境
-    $0 php84 dev --no-cache                         # 无缓存构建PHP84
-    $0 php84 php82 mysql8 valkey prod               # 构建多个服务生产环境
-    $0 php84 php82 mysql8 valkey prod --force-recreate  # 强制重新创建
-    $0 elk prod                                     # 构建ELK栈生产环境
-    $0 sgr prod                                     # 构建SGR栈生产环境
-    $0 php84 dev --multi-arch                       # 多架构构建
-
-${YELLOW}特殊组合:${NC}
-    elk     -> elasticsearch, kibana, logstash
-    sgr     -> spug, gitea, rap2
-    all     -> 所有可用服务
-
-EOF
-}
-
-# 从 .env 文件中获取代理配置
+# 从分层配置文件中获取代理配置
 DEFAULT_HTTP_PROXY=""
 DEFAULT_HTTPS_PROXY=""
 DEFAULT_NO_PROXY="localhost,127.0.0.1"
 
-if [ -n "${http_proxy:-}" ]; then
-    DEFAULT_HTTP_PROXY="$http_proxy"
+# 加载分层配置文件中的代理设置
+load_proxy_config() {
+    local config_dir="$SCRIPT_DIR/config/env"
+    
+    # 检查并加载base.env中的代理配置
+    if [[ -f "$config_dir/base.env" ]]; then
+        while IFS='=' read -r key value; do
+            # 跳过注释和空行
+            [[ "$key" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "$key" ]] && continue
+            
+            # 去掉值中的注释部分和空格
+            value=$(echo "$value" | sed 's/[[:space:]]*#.*$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            
+            case "$key" in
+                HTTP_PROXY)
+                    if [[ -n "$value" ]]; then
+                        DEFAULT_HTTP_PROXY="$value"
+                    fi
+                    ;;
+                HTTPS_PROXY)
+                    if [[ -n "$value" ]]; then
+                        DEFAULT_HTTPS_PROXY="$value"
+                    fi
+                    ;;
+                NO_PROXY)
+                    if [[ -n "$value" ]]; then
+                        DEFAULT_NO_PROXY="$value"
+                    fi
+                    ;;
+            esac
+        done < "$config_dir/base.env"
+    fi
+}
+
+# 加载代理配置
+load_proxy_config
+
+# 如果环境变量已设置，优先使用环境变量
+if [ -n "${HTTP_PROXY:-}" ]; then
+    DEFAULT_HTTP_PROXY="$HTTP_PROXY"
 fi
 
-if [ -n "${https_proxy:-}" ]; then
-    DEFAULT_HTTPS_PROXY="$https_proxy"
+if [ -n "${HTTPS_PROXY:-}" ]; then
+    DEFAULT_HTTPS_PROXY="$HTTPS_PROXY"
 fi
 
-if [ -n "${no_proxy:-}" ]; then
-    DEFAULT_NO_PROXY="$no_proxy"
+if [ -n "${NO_PROXY:-}" ]; then
+    DEFAULT_NO_PROXY="$NO_PROXY"
 fi
 
 # 检测是否为WSL环境
@@ -313,103 +81,106 @@ is_wsl_environment() {
 }
 
 # 智能代理检测函数
-detect_and_set_proxy() {
-    log "执行智能代理检测..."
+# detect_and_set_proxy() {
+#     log "执行智能代理检测..."
 
-    # 检查是否强制禁用代理检测
-    if [[ "${DISABLE_PROXY_DETECTION:-false}" == "true" ]]; then
-        log "代理检测已被禁用 (DISABLE_PROXY_DETECTION=true)"
-        return 0
-    fi
+#     # 检查是否强制禁用代理检测
+#     if [[ "${DISABLE_PROXY_DETECTION:-false}" == "true" ]]; then
+#         log "代理检测已被禁用 (DISABLE_PROXY_DETECTION=true)"
+#         return 0
+#     fi
 
-    # 检测地理位置
-    local location=""
-    local timeout=10
+#     # 检测地理位置
+#     local location=""
+#     local timeout=10
 
-    info "正在检测地理位置..."
+#     info "正在检测地理位置..."
 
-    # 方法1: 使用ipinfo.io检测
-    location=$(timeout $timeout curl -s --connect-timeout 5 "https://ipinfo.io/country" 2>/dev/null || echo "")
-    if [[ -n "$location" ]]; then
-        info "通过 ipinfo.io 检测到位置: $location"
-    fi
+#     # 方法1: 使用ipinfo.io检测
+#     location=$(timeout $timeout curl -s --connect-timeout 5 "https://ipinfo.io/country" 2>/dev/null || echo "")
+#     if [[ -n "$location" ]]; then
+#         info "通过 ipinfo.io 检测到位置: $location"
+#     fi
 
-    # 方法2: 如果第一种方法失败，使用ip-api.com
-    if [[ -z "$location" ]]; then
-        location=$(timeout $timeout curl -s --connect-timeout 5 "http://ip-api.com/line?fields=countryCode" 2>/dev/null || echo "")
-        if [[ -n "$location" ]]; then
-            info "通过 ip-api.com 检测到位置: $location"
-        fi
-    fi
+#     # 方法2: 如果第一种方法失败，使用ip-api.com
+#     if [[ -z "$location" ]]; then
+#         location=$(timeout $timeout curl -s --connect-timeout 5 "http://ip-api.com/line?fields=countryCode" 2>/dev/null || echo "")
+#         if [[ -n "$location" ]]; then
+#             info "通过 ip-api.com 检测到位置: $location"
+#         fi
+#     fi
 
-    # 方法3: 检查特定网站的可访问性
-    if [[ -z "$location" ]]; then
-        info "尝试通过网站可访问性判断位置..."
-        if ! timeout 5 curl -s --connect-timeout 3 "https://www.google.com" >/dev/null 2>&1; then
-            if timeout 5 curl -s --connect-timeout 3 "https://www.baidu.com" >/dev/null 2>&1; then
-                location="CN"
-                info "通过网站可访问性判断可能在中国大陆"
-            fi
-        fi
-    fi
+#     # 方法3: 检查特定网站的可访问性
+#     if [[ -z "$location" ]]; then
+#         info "尝试通过网站可访问性判断位置..."
+#         if ! timeout 5 curl -s --connect-timeout 3 "https://www.google.com" >/dev/null 2>&1; then
+#             if timeout 5 curl -s --connect-timeout 3 "https://www.baidu.com" >/dev/null 2>&1; then
+#                 location="CN"
+#                 info "通过网站可访问性判断可能在中国大陆"
+#             fi
+#         fi
+#     fi
 
-    # 根据位置设置代理和镜像源
-    if [[ "$location" =~ ^(CN|China|中国)$ ]]; then
-        log "检测到位置在中国大陆..."
+#     # 根据位置设置代理和镜像源
+#     if [[ "$location" =~ ^(CN|China|中国)$ ]]; then
+#         log "检测到位置在中国大陆..."
 
-        # 从.env文件读取代理配置
-        local env_http_proxy=""
-        local env_https_proxy=""
+#         # 从分层配置文件中读取代理配置
+#         local env_http_proxy="${HTTP_PROXY:-}"
+#         local env_https_proxy="${HTTPS_PROXY:-}"
 
-        if [[ -f ".env" ]]; then
-            env_http_proxy=$(grep "^http_proxy=" .env 2>/dev/null | cut -d'=' -f2- | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-            env_https_proxy=$(grep "^https_proxy=" .env 2>/dev/null | cut -d'=' -f2- | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-        fi
+#         # 检查代理配置是否为空
+#         if [[ -z "$env_http_proxy" || -z "$env_https_proxy" ]]; then
+#             if is_wsl_environment; then
+#                 log "检测到WSL环境，自动设置代理配置..."
+#                 export http_proxy="$DEFAULT_HTTP_PROXY"
+#                 export https_proxy="$DEFAULT_HTTPS_PROXY"
+#                 export HTTP_PROXY="$DEFAULT_HTTP_PROXY"
+#                 export HTTPS_PROXY="$DEFAULT_HTTPS_PROXY"
+#                 export no_proxy="$DEFAULT_NO_PROXY"
+#                 export NO_PROXY="$DEFAULT_NO_PROXY"
+#                 info "已设置代理: $DEFAULT_HTTP_PROXY"
+#             else
+#                 # 显示黄色加粗警告信息
+#                 echo -e "\n${YELLOW}${BOLD}⚠️  当前处于国内运行环境，未设置http_proxy代理。${NC}"
+#                 echo -e "${YELLOW}${BOLD}   建议在config/env/base.env文件中配置代理以提高构建速度：${NC}"
+#                 echo -e "${YELLOW}${BOLD}   http_proxy=$DEFAULT_HTTP_PROXY${NC}"
+#                 echo -e "${YELLOW}${BOLD}   https_proxy=$DEFAULT_HTTPS_PROXY${NC}"
+#                 echo -e "${YELLOW}${BOLD}   10秒后继续执行...${NC}\n"
 
-        # 检查代理配置是否为空
-        if [[ -z "$env_http_proxy" || -z "$env_https_proxy" ]]; then
-            if is_wsl_environment; then
-                log "检测到WSL环境，自动设置代理配置..."
-                export http_proxy="$DEFAULT_HTTP_PROXY"
-                export https_proxy="$DEFAULT_HTTPS_PROXY"
-                export no_proxy="$DEFAULT_NO_PROXY"
-                info "已设置代理: $DEFAULT_HTTP_PROXY"
-            else
-                # 显示黄色加粗警告信息
-                echo -e "\n${YELLOW}${BOLD}⚠️  当前处于国内运行环境，未设置http_proxy代理。${NC}"
-                echo -e "${YELLOW}${BOLD}   建议在.env文件中配置代理以提高构建速度：${NC}"
-                echo -e "${YELLOW}${BOLD}   http_proxy=$DEFAULT_HTTP_PROXY${NC}"
-                echo -e "${YELLOW}${BOLD}   https_proxy=$DEFAULT_HTTPS_PROXY${NC}"
-                echo -e "${YELLOW}${BOLD}   10秒后继续执行...${NC}\n"
+#                 # 倒计时显示
+#                 for i in {10..1}; do
+#                     echo -ne "${YELLOW}${BOLD}倒计时: $i 秒\r${NC}"
+#                     sleep 1
+#                 done
+#                 echo -e "\n${GREEN}继续执行构建...${NC}\n"
 
-                # 倒计时显示
-                for i in {10..1}; do
-                    echo -ne "${YELLOW}${BOLD}倒计时: $i 秒\r${NC}"
-                    sleep 1
-                done
-                echo -e "\n${GREEN}继续执行构建...${NC}\n"
+#                 # 设置默认的代理配置
+#                 export no_proxy="$DEFAULT_NO_PROXY"
+#                 export NO_PROXY="$DEFAULT_NO_PROXY"
+#             fi
+#         else
+#             log "使用分层配置文件中的代理配置..."
+#             export http_proxy="$env_http_proxy"
+#             export https_proxy="$env_https_proxy"
+#             export HTTP_PROXY="$env_http_proxy"
+#             export HTTPS_PROXY="$env_https_proxy"
+#             export no_proxy="$DEFAULT_NO_PROXY"
+#             export NO_PROXY="$DEFAULT_NO_PROXY"
+#             info "代理配置: $env_http_proxy"
+#         fi
 
-                # 设置默认的no_proxy
-                export no_proxy="$DEFAULT_NO_PROXY"
-            fi
-        else
-            log "使用.env文件中的代理配置..."
-            export http_proxy="$env_http_proxy"
-            export https_proxy="$env_https_proxy"
-            export no_proxy="$DEFAULT_NO_PROXY"
-            info "代理配置: $env_http_proxy"
-        fi
+#         # 中国大陆启用镜像源
+#         export CHANGE_SOURCE="true"
 
-        # 中国大陆启用镜像源
-        export CHANGE_SOURCE="true"
-
-    else
-        log "检测到位置在海外，禁用代理配置，禁用镜像源..."
-        unset http_proxy https_proxy
-        export no_proxy="$DEFAULT_NO_PROXY"
-        export CHANGE_SOURCE="false"   # 海外使用镜像源加速
-    fi
-}
+#     else
+#         log "检测到位置在海外，禁用代理配置，禁用镜像源..."
+#         unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+#         export no_proxy="$DEFAULT_NO_PROXY"
+#         export NO_PROXY="$DEFAULT_NO_PROXY"
+#         export CHANGE_SOURCE="false"   # 海外使用镜像源加速
+#     fi
+# }
 
 # 服务名映射函数
 map_service_name() {
@@ -421,15 +192,16 @@ map_service_name() {
         php81) echo "php81_apache" ;;
         php80) echo "php80_apache" ;;
         php74) echo "php74_apache" ;;
-        php72) echo "php72_apache" ;;
+        php72) echo "php72" ;;
         nginx) echo "nginx" ;;
         tengine) echo "tengine" ;;
-        mysql8) echo "mysql8" ;;
         mysql) echo "mysql" ;;
+        mysql_backup) echo "mysql_backup" ;;
         redis) echo "redis" ;;
         valkey) echo "valkey" ;;
         mongo) echo "mongo" ;;
-        postgresql) echo "postgresql" ;;
+        postgresql) echo "postgres" ;;
+        pgadmin) echo "pgadmin" ;;
         *) echo "$service" ;;
     esac
 }
@@ -481,7 +253,7 @@ get_special_services() {
             echo ""  # SGR通常构建整个栈
             ;;
         all)
-            echo "nginx php84_apache php82_apache php74_apache mysql8 redis valkey"
+            echo "nginx php84_apache php82_apache php74_apache mysql mysql_backup redis valkey"
             ;;
         *)
             echo ""
@@ -495,29 +267,17 @@ build_services() {
     shift
     local services=("$@")
 
-    # MySQL服务冲突检测
-    local has_mysql=false
-    local has_mysql8=false
-    for service in "${services[@]}"; do
-        if [[ "$service" == "mysql" ]]; then
-            has_mysql=true
-        elif [[ "$service" == "mysql8" ]]; then
-            has_mysql8=true
+    # 下载依赖软件包
+    log "检查并下载构建依赖..."
+    if [[ -f "$SCRIPT_DIR/scripts/download_dependencies.sh" ]]; then
+        # 调用下载脚本
+        if ! "$SCRIPT_DIR/scripts/download_dependencies.sh" "${services[@]}"; then
+            warn "依赖下载失败，但继续构建过程"
+        else
+            success "依赖下载完成"
         fi
-    done
-
-    if [[ "$has_mysql" == "true" && "$has_mysql8" == "true" ]]; then
-        echo -e "${RED}❌ 检测到同时指定了 mysql 和 mysql8 服务！${NC}" >&2
-        echo "" >&2
-        echo -e "${YELLOW}${BOLD}⚠️  重要提示：${NC}" >&2
-        echo -e "  • mysql-server:  使用 Dockerfile (标准安装方式)" >&2
-        echo -e "  • mysql8-server: 使用 Dockerfile_gf (优化安装方式)" >&2
-        echo "" >&2
-        echo -e "${CYAN}请选择其中一种MySQL服务：${NC}" >&2
-        echo -e "  ./build.sh mysql $environment    # 使用标准安装方式" >&2
-        echo -e "  ./build.sh mysql8 $environment   # 使用优化安装方式" >&2
-        echo "" >&2
-        exit 1
+    else
+        warn "下载脚本不存在: $SCRIPT_DIR/scripts/download_dependencies.sh"
     fi
 
     # Web服务冲突检测
@@ -550,6 +310,16 @@ build_services() {
 
     # 处理特殊组合
     local final_services=()
+    local auto_add_mysql_backup=false
+    
+    # 检查是否包含 mysql 服务，如果是则自动添加 mysql_backup
+    for service in "${services[@]}"; do
+        if [[ "$service" == "mysql" ]]; then
+            auto_add_mysql_backup=true
+            break
+        fi
+    done
+    
     for service in "${services[@]}"; do
         local special_services=$(get_special_services "$service")
         if [[ -n "$special_services" ]]; then
@@ -562,6 +332,36 @@ build_services() {
             final_services+=($(map_service_name "$service"))
         fi
     done
+    
+    # 如果检测到 mysql 服务，自动添加 mysql_backup
+    if [[ "$auto_add_mysql_backup" == "true" ]]; then
+        # 检查是否已经包含 mysql_backup，避免重复添加
+        local has_mysql_backup=false
+        for service in "${final_services[@]}"; do
+            if [[ "$service" == "mysql_backup" ]]; then
+                has_mysql_backup=true
+                break
+            fi
+        done
+        
+        if [[ "$has_mysql_backup" == "false" ]]; then
+            final_services+=("mysql_backup")
+            info "检测到 MySQL 服务，自动添加 mysql_backup 服务"
+        fi
+        
+        # 根据构建的MySQL版本设置mysql_backup使用的镜像
+        local mysql_backup_image="hg_dnmpr-mysql:latest"
+        for service in "${services[@]}"; do
+            if [[ "$service" == "mysql" ]]; then
+                mysql_backup_image="hg_dnmpr-mysql:latest"
+                info "设置 mysql_backup 使用 MySQL 镜像: $mysql_backup_image"
+                break
+            fi
+        done
+        
+        # 导出环境变量供docker-compose使用
+        export MYSQL_BACKUP_IMAGE="$mysql_backup_image"
+    fi
 
     # 构建Docker命令
     local docker_cmd="docker compose $compose_files build"
@@ -603,6 +403,56 @@ build_services() {
     # 设置Docker构建环境变量
     export DOCKER_BUILDKIT=1
     export COMPOSE_DOCKER_CLI_BUILD=1
+    
+    # 检测网络连接，如果无法访问 Docker Hub，自动启用国内镜像源
+    if [[ "${CHANGE_SOURCE:-false}" != "true" ]]; then
+        info "检测网络连接..."
+        if ! timeout 5 curl -s -o /dev/null https://registry-1.docker.io 2>/dev/null; then
+            warn "无法访问 Docker Hub，尝试启用国内镜像源加速"
+            # 检测国内镜像源是否可访问
+            if timeout 5 curl -s -o /dev/null https://mirrors.ustc.edu.cn 2>/dev/null; then
+                export CHANGE_SOURCE=true
+                info "已启用国内镜像源加速（CHANGE_SOURCE=true）"
+            else
+                warn "国内镜像源也无法访问，使用默认镜像源（可能需要配置代理）"
+                export CHANGE_SOURCE=false
+            fi
+        else
+            info "网络连接正常，使用默认镜像源"
+        fi
+    else
+        # 如果已配置使用国内镜像源，检测是否可访问
+        info "已配置使用国内镜像源加速（CHANGE_SOURCE=true）"
+        if ! timeout 5 curl -s -o /dev/null https://mirrors.ustc.edu.cn 2>/dev/null; then
+            warn "国内镜像源无法访问，回退到官方镜像源"
+            export CHANGE_SOURCE=false
+        fi
+    fi
+    
+    # 确保代理环境变量被正确导出到Docker构建过程
+    if [[ -n "${HTTP_PROXY:-}" ]]; then
+        export HTTP_PROXY="$HTTP_PROXY"
+        info "设置HTTP_PROXY: $HTTP_PROXY"
+    else
+        export HTTP_PROXY=""
+        info "HTTP_PROXY未设置，使用空值"
+    fi
+    
+    if [[ -n "${HTTPS_PROXY:-}" ]]; then
+        export HTTPS_PROXY="$HTTPS_PROXY"
+        info "设置HTTPS_PROXY: $HTTPS_PROXY"
+    else
+        export HTTPS_PROXY=""
+        info "HTTPS_PROXY未设置，使用空值"
+    fi
+    
+    if [[ -n "${NO_PROXY:-}" ]]; then
+        export NO_PROXY="$NO_PROXY"
+        info "设置NO_PROXY: $NO_PROXY"
+    else
+        export NO_PROXY="localhost,127.0.0.1"
+        info "NO_PROXY未设置，使用默认值: localhost,127.0.0.1"
+    fi
 
     # 执行命令
     eval "$docker_cmd"
@@ -629,16 +479,22 @@ FORCE_RECREATE="false"
 AUTO_PRUNE="false"  # 新增：构建后自动清理
 AUTO_UP="false"  # 新增：构建后自动启动服务
 
+# 检查是否没有参数，如果没有参数则显示帮助信息
+if [[ $# -eq 0 ]]; then
+    show_build_help
+    exit 0
+fi
+
 # 解析参数
 while [[ $# -gt 0 ]]; do
     case $1 in
         # 服务名
-        php84|php83|php82|php81|php80|php74|php72|nginx|tengine|mysql8|mysql|redis|valkey|mongo|postgres|elk|sgr|all)
+        php84|php83|php82|php81|php80|php74|php72|nginx|tengine|mysql|mysql_backup|redis|valkey|mongo|postgres|elk|sgr|all)
             SERVICES+=("$1")
             shift
             ;;
         # 环境类型
-        dev|development|prod|production|test|testing)
+        dev|development|prod|production)
             ENVIRONMENT="$1"
             shift
             ;;
@@ -675,8 +531,8 @@ while [[ $# -gt 0 ]]; do
             AUTO_UP="true"
             shift
             ;;
-        --help|-h)
-            show_help
+        --help|-h|help)
+            show_build_help
             exit 0
             ;;
         *)
@@ -693,41 +549,37 @@ fi
 # 切换到项目目录
 cd "$PROJECT_DIR"
 
-# 检查.env文件
-if [[ ! -f ".env" ]]; then
-    if [[ -f ".env.example" ]]; then
-        warn ".env文件不存在，从.env.example复制..."
-        cp .env.example .env
+# 加载分层配置文件
+load_config_files
+
+# 加载ELK环境特定配置（如果构建ELK服务）
+if [[ " ${SERVICES[@]} " =~ " elk " ]] || [[ " ${SERVICES[@]} " =~ " elasticsearch " ]] || [[ " ${SERVICES[@]} " =~ " kibana " ]] || [[ " ${SERVICES[@]} " =~ " logstash " ]]; then
+    # 标准化环境名称
+    env_name="$ENVIRONMENT"
+    case "$env_name" in
+        production|prod) env_name="prod" ;;
+        development|dev) env_name="dev" ;;
+        test|testing) env_name="test" ;;
+        staging|stage) env_name="staging" ;;
+        *) env_name="dev" ;;  # 默认为dev
+    esac
+    
+    # 检查ELK环境配置文件
+    config_dir="$PROJECT_DIR/config/env"
+    elk_env_file="$config_dir/elk.${env_name}.env"
+    if [[ -f "$elk_env_file" ]]; then
+        info "🔧 加载ELK【${env_name}】环境配置: $elk_env_file"
+        set -a
+        source <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$elk_env_file" 2>/dev/null || true)
+        set +a
     else
-        error ".env文件不存在，请先创建.env文件"
+        warn "未找到ELK环境配置文件: $elk_env_file，使用默认配置"
     fi
 fi
 
-# 加载环境变量
-if [[ -f ".env" ]]; then
-    set +u
-    while IFS='=' read -r key value; do
-        # 跳过注释和空行
-        [[ "$key" =~ ^[[:space:]]*# ]] && continue
-        [[ -z "$key" ]] && continue
-
-        # 去掉值中的注释部分
-        value=$(echo "$value" | sed 's/[[:space:]]*#.*$//')
-
-        # 设置环境变量
-        if [[ -n "$value" ]]; then
-            export "$key"="$value"
-        fi
-    done < <(grep -v '^[[:space:]]*#' .env | grep -v '^[[:space:]]*$')
-    set -u
-
-    log "环境变量加载完成"
-else
-    warn ".env 文件不存在，使用默认配置"
-fi
-
 # 执行代理检测
-detect_and_set_proxy
+# detect_and_set_proxy
+
 for i in {5..1}; do
     echo -ne "${YELLOW}${BOLD}倒计时: $i 秒\r${NC}"
     sleep 1
@@ -735,16 +587,69 @@ done
 
 # 开始构建
 log "开始 Docker 项目构建"
-log "构建日志: $LOG_FILE"
 
 # 设置配置目录权限
 setup_conf_permissions
 
-# 配置Docker容器别名
-setup_docker_aliases
+# 配置Docker容器别名（传递脚本名称用于日志标识）
+setup_docker_aliases "build"
 
 # 清理日志文件
 cleanup_logs
+
+# 检查是否包含 all 参数，如果是则展示服务列表并倒计时
+for service in "${SERVICES[@]}"; do
+    if [[ "$service" == "all" ]]; then
+        # 获取 all 对应的服务列表
+        all_services=$(get_special_services "all")
+        
+        echo -e "\n${CYAN}${BOLD}=== 即将构建以下服务 ===${NC}"
+        echo -e "${YELLOW}环境类型: ${ENVIRONMENT}${NC}"
+        echo -e "${YELLOW}构建服务列表:${NC}"
+        
+        # 逐行显示服务
+        for svc in $all_services; do
+            case "$svc" in
+                nginx)
+                    echo -e "  • ${GREEN}nginx${NC}          - 标准的Nginx Web服务器"
+                    ;;
+                php84)
+                    echo -e "  • ${GREEN}php84_apache${NC}   - PHP 8.4 + Apache 服务器"
+                    ;;
+                php82)
+                    echo -e "  • ${GREEN}php82_apache${NC}   - PHP 8.2 + Apache 服务器"
+                    ;;
+                php74)
+                    echo -e "  • ${GREEN}php74_apache${NC}   - PHP 7.4 + Apache 服务器"
+                    ;;
+                mysql)
+                    echo -e "  • ${GREEN}mysql${NC}         - MySQL 8.0 数据库服务器"
+                    ;;
+                redis)
+                    echo -e "  • ${GREEN}redis${NC}          - Redis 缓存服务器"
+                    ;;
+                valkey)
+                    echo -e "  • ${GREEN}valkey${NC}         - Valkey 缓存服务器"
+                    ;;
+                *)
+                    echo -e "  • ${GREEN}$svc${NC}"
+                    ;;
+            esac
+        done
+        
+        echo -e "\n${YELLOW}${BOLD}⚠️  注意: 构建过程可能需要较长时间，请确保网络连接稳定${NC}"
+        echo -e "${RED}${BOLD}如需取消构建，请按 Ctrl+C${NC}\n"
+        
+        # 倒计时15秒
+        for i in {15..1}; do
+            echo -ne "${YELLOW}${BOLD}构建将在 $i 秒后开始...\r${NC}"
+            sleep 1
+        done
+        echo -e "${GREEN}${BOLD}开始构建！${NC}\n"
+        
+        break  # 找到 all 参数后退出循环
+    fi
+done
 
 build_services "$ENVIRONMENT" "${SERVICES[@]}"
 
@@ -783,7 +688,7 @@ if [[ "$AUTO_UP" == "true" ]]; then
         done
 
         # 添加环境参数
-        up_cmd+=" $ENVIRONMENT"
+        up_cmd+=" --env $ENVIRONMENT"
 
         log "执行启动命令: $up_cmd"
 

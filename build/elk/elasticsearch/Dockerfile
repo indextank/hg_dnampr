@@ -21,7 +21,8 @@ RUN set -eux; \
 		sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list; \
 	fi; \
 	\
-    apt-get update; \
+    # 使用重试机制和多个失败恢复策略更新软件源
+    apt-get update --fix-missing || (sleep 5 && apt-get update --fix-missing) || apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y curl wget
 
 COPY ./src/elk/elasticsearch ${TMP_DIR}
@@ -119,7 +120,7 @@ RUN set -eux; \
 	fi; \
 	\
     export DEBIAN_FRONTEND=noninteractive; \
-    apt-get update; \
+    apt-get update --fix-missing || (sleep 5 && apt-get update --fix-missing) || apt-get update; \
     apt-get upgrade -y; \
     apt-get install -y --no-install-recommends ca-certificates curl netcat p11-kit unzip zip; \
     apt-get clean; \
@@ -140,6 +141,7 @@ COPY --from=builder --chown=0:0 /bin/tini /bin/tini
 ENV PATH=/usr/share/elasticsearch/bin:$PATH
 
 COPY ./build/elk/elasticsearch/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY ./build/elk/elasticsearch/setup-kibana-password.sh /usr/local/bin/setup-kibana-password.sh
 
 # 1. Sync the user and group permissions of /etc/passwd
 # 2. Set correct permissions of the entrypoint
@@ -154,6 +156,8 @@ COPY ./build/elk/elasticsearch/docker-entrypoint.sh /usr/local/bin/docker-entryp
 #    config directory.
 RUN chmod g=u /etc/passwd && \
     chmod 0555 /usr/local/bin/docker-entrypoint.sh && \
+    chmod 0755 /usr/local/bin/setup-kibana-password.sh && \
+    chown root:root /usr/local/bin/setup-kibana-password.sh && \
     find / -xdev -perm -4000 -exec chmod ug-s {} + && \
     chmod 0775 /usr/share/elasticsearch && \
     chown elasticsearch bin config config/jvm.options.d data logs plugins
@@ -161,7 +165,8 @@ RUN chmod g=u /etc/passwd && \
 # Update "cacerts" bundle to use Ubuntu's CA certificates (and make sure it
 # stays up-to-date with changes to Ubuntu's store)
 COPY ./build/elk/elasticsearch/docker-openjdk /etc/ca-certificates/update.d/docker-openjdk
-RUN /etc/ca-certificates/update.d/docker-openjdk
+RUN chmod +x /etc/ca-certificates/update.d/docker-openjdk && \
+    /etc/ca-certificates/update.d/docker-openjdk
 
 RUN if [[ "${PLUGINS}" == *",amazon-ec2,"* ]]; then \
         printf "y\n" | elasticsearch-plugin install amazon-ec2; \

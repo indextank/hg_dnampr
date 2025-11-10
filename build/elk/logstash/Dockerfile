@@ -16,10 +16,11 @@ RUN set -eux; \
 	fi; \
 	\
     export DEBIAN_FRONTEND=noninteractive; \
-    apt-get update -y; \
+    apt-get update --fix-missing || (sleep 5 && apt-get update --fix-missing) || apt-get update; \
     apt-get install -y procps findutils locales tar gzip curl wget; \
     apt-get clean all; \
-    locale-gen 'en_US.UTF-8'; \
+    locale-gen 'en_US.UTF-8' || true; \
+    update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 || true; \
     apt-get clean metadata; \
     apt-get clean all
 

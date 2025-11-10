@@ -1,10 +1,6 @@
 # 使用debian:bookworm-slim作为基础镜像
 FROM debian:bookworm-slim
 
-# 代理设置参数
-ARG http_proxy
-ARG https_proxy
-ARG no_proxy
 
 ARG NGINX_VERSION
 ARG HMNM_VERSION

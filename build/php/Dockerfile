@@ -1,11 +1,6 @@
 # 第一阶段：构建基础依赖
 FROM debian:bookworm-slim AS base-builder
 
-# 代理设置参数
-ARG http_proxy
-ARG https_proxy
-ARG no_proxy
-
 # 构建参数定义
 ARG SOURCE_LIST
 ARG CHANGE_SOURCE=false
@@ -520,15 +515,29 @@ RUN set -eux; \
 	bash ext-debian.sh | tee -a /tmp/ext-debian.log || echo "扩展安装可能有部分失败"; \
 	\
 	echo "安装Composer"; \
-	php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" || { echo "下载Composer失败"; }; \
-	php -r "if (hash_file('sha384', 'composer-setup.php') === 'dac665fdc30fdd8ec78b38b9800061b4150413ff2e3b6f88543c636f7cd84f6db9189d43a81e5503cda447da73c7e5b6') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;" || echo "验证Composer失败"; \
-	php composer-setup.php || echo "安装Composer失败"; \
-	php -r "unlink('composer-setup.php');" || echo "删除Composer安装程序失败"; \
+	# 使用官方推荐的安装方法，动态获取最新哈希值 \
+	EXPECTED_CHECKSUM="$(php -r 'copy("https://composer.github.io/installer.sig", "php://stdout");')"; \
+	php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" || { echo "下载Composer失败"; exit 1; }; \
+	ACTUAL_CHECKSUM="$(php -r 'echo hash_file("sha384", "composer-setup.php");')"; \
+	if [ "$EXPECTED_CHECKSUM" != "$ACTUAL_CHECKSUM" ]; then \
+		echo >&2 'ERROR: Invalid installer checksum'; \
+		rm composer-setup.php; \
+		exit 1; \
+	fi; \
+	php composer-setup.php --quiet; \
+	RESULT=$?; \
+	rm composer-setup.php; \
+	if [ $RESULT -ne 0 ]; then \
+		echo >&2 'ERROR: Composer installation failed'; \
+		exit 1; \
+	fi; \
 	if [ -f "composer.phar" ]; then \
 		mv composer.phar /usr/local/bin/composer; \
 		chmod +x /usr/local/bin/composer; \
+		echo "Composer安装成功"; \
 	else \
-		echo "Composer安装失败，未生成composer.phar文件"; \
+		echo "ERROR: Composer安装失败，未生成composer.phar文件"; \
+		exit 1; \
 	fi; \
 	\
 	# 更新PECL通道

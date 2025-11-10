@@ -1,10 +1,15 @@
 x-common-variables:
   &default-common
-  restart: always
-  env_file: ./.env
+  restart: unless-stopped
+  env_file:
+    - ./config/env/base.env
+    - ./config/env/web.env
+    - ./config/env/php.env
+    - ./config/env/database.env
+    - ./config/env/redis.env
   dns:
-    - ${DNS:-8.8.4.4}
-    - ${DNS:-223.5.5.5}
+    - ${DNS_PRIMARY:-223.5.5.5}
+    - ${DNS_SECONDARY:-114.114.114.114}
 
 services:
 
@@ -52,16 +57,10 @@ services:
     extends:
       file: compose_databases.yaml
       service: mysql-server
-
-  mysql8:
+  mysql_backup:
     extends:
       file: compose_databases.yaml
-      service: mysql8-server
-
-  db-data-mysql:
-    extends:
-      file: compose_databases.yaml
-      service: db-data-mysql
+      service: mysql-backup
 
 
 ################   postgres  ########################
@@ -123,6 +122,5 @@ networks:
 
 volumes:
   mysql_data:
-  mysql8_data:
   pgadmin:
   php_sessions:

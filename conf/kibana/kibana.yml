@@ -11,10 +11,16 @@ server.port: 5601
 server.shutdownTimeout: "5s"
 server.maxPayload: 1048576
 
-# Elasticsearch 连接
+# Elasticsearch 连接（使用kibana_system账号）
 elasticsearch.hosts: ["http://elasticsearch:9200"]
+elasticsearch.username: ${ELASTICSEARCH_USERNAME}
+elasticsearch.password: ${ELASTICSEARCH_PASSWORD}
 elasticsearch.pingTimeout: 1500
 elasticsearch.requestTimeout: 30000
+
+# Elasticsearch SSL 配置（已禁用）
+# elasticsearch.ssl.certificateAuthorities: ["/usr/share/kibana/config/certs/ca/ca.crt"]
+# elasticsearch.ssl.verificationMode: certificate
 
 # 禁用监控功能（减少内存使用）
 monitoring.ui.container.elasticsearch.enabled: false
@@ -44,6 +50,21 @@ xpack.encryptedSavedObjects.encryptionKey: cefc72fa43965033bf376ddbf75aebe1
 xpack.reporting.encryptionKey: fe42edf0aae5a823e0e16c300a85ac86
 xpack.security.encryptionKey: eaf5b398085be7ea83afe3d5353a112c
 
+# 安全配置优化（禁用 SSL）
+server.ssl.enabled: false
+# server.ssl.key: "/usr/share/kibana/config/certs/kibana/kibana.key"
+# server.ssl.certificate: "/usr/share/kibana/config/certs/kibana/kibana.crt"
+# server.ssl.certificateAuthorities: ["/usr/share/kibana/config/certs/ca/ca.crt"]
+server.securityResponseHeaders.disableEmbedding: false
+
+# 安全会话配置（开发环境）
+# 注意：不要设置xpack.security.enabled，Kibana会自动检测Elasticsearch的安全状态
+xpack.security.session.idleTimeout: "8h"
+xpack.security.session.lifespan: "30d"
+xpack.security.secureCookies: false
+xpack.security.session.cleanupInterval: "1h"
+server.securityResponseHeaders.strictTransportSecurity: null
+
 # 禁用遥测数据收集
 telemetry.allowChangingOptInStatus: false
 
@@ -54,3 +75,21 @@ savedObjects.maxImportPayloadBytes: 10485760
 xpack.fleet.enabled: false
 xpack.apm.enabled: false
 xpack.uptime.enabled: false
+
+# 禁用 AI 助手功能（避免许可证警告）
+xpack.observabilityAIAssistant.enabled: false
+
+# 禁用 Profiling 功能（避免许可证警告）
+xpack.profiling.enabled: false
+
+# Task Manager 优化配置（减少对 Elasticsearch 的压力）
+xpack.task_manager.poll_interval: 10000
+xpack.task_manager.capacity: 5
+xpack.task_manager.max_attempts: 2
+xpack.task_manager.request_capacity: 500
+xpack.task_manager.monitored_aggregated_stats_refresh_rate: 60000
+xpack.task_manager.monitored_stats_health_verbose_log.enabled: false
+xpack.task_manager.monitored_task_execution_thresholds.default.error_threshold: 90
+xpack.task_manager.monitored_task_execution_thresholds.default.warn_threshold: 80
+# 禁用ProductDocBase任务（避免网络错误）
+xpack.task_manager.unsafe.exclude_task_types: ["ProductDocBase:EnsureUpToDate"]

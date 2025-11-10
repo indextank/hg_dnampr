@@ -17,13 +17,36 @@ http.cors.enabled: true
 http.cors.allow-origin: "*"
 http.cors.allow-headers: "Authorization,X-Requested-With,Content-Length,Content-Type"
 
-# X-Pack 设置（更新为 8.x 版本支持的配置）
-xpack.security.enabled: false
+# X-Pack 设置（根据环境变量控制）
+# 开发环境：启用安全功能，禁用SSL
+# 生产环境：启用安全功能+SSL
+xpack.security.enabled: ${ELK_SECURITY_ENABLED}
+xpack.security.transport.ssl.enabled: ${ELK_TRANSPORT_SSL_ENABLED}
+xpack.security.http.ssl.enabled: ${ELK_HTTP_SSL_ENABLED}
+
+# SSL证书配置（仅在ELK_TRANSPORT_SSL_ENABLED=true时Elasticsearch才会读取这些配置）
+# 当SSL被禁用时（开发环境），这些配置会被Elasticsearch忽略，无需文件存在
+xpack.security.transport.ssl.verification_mode: certificate
+xpack.security.transport.ssl.key: certs/elasticsearch/elasticsearch.key
+xpack.security.transport.ssl.certificate: certs/elasticsearch/elasticsearch.crt
+xpack.security.transport.ssl.certificate_authorities: ["certs/ca/ca.crt"]
+
+xpack.security.http.ssl.key: certs/elasticsearch/elasticsearch.key
+xpack.security.http.ssl.certificate: certs/elasticsearch/elasticsearch.crt
+xpack.security.http.ssl.certificate_authorities: ["certs/ca/ca.crt"]
+
+xpack.security.enrollment.enabled: false
 xpack.profiling.enabled: false
 xpack.monitoring.templates.enabled: false
 
+# 禁用机器学习服务（消除推理端点授权警告）
+xpack.ml.enabled: false
+
 # 插件相关设置
 plugin.mandatory: []
+
+# 注意：repositories.s3.enabled 和 aws.sdk.load_config 在 8.18.4 版本中已移除
+# S3 相关功能通过环境变量在 docker-compose 中禁用
 
 # 索引设置
 action.auto_create_index: true
@@ -34,9 +57,19 @@ logger.level: "WARN"
 # 特别设置AWS相关日志级别为ERROR，减少警告信息
 logger.com.amazonaws: "ERROR"
 logger.org.elasticsearch.repositories.s3: "ERROR"
+# 抑制 repository-s3 权限相关警告
+logger.org.elasticsearch.entitlement.runtime.policy.PolicyManager.repository-s3: "ERROR"
+logger.org.elasticsearch.entitlement.runtime.api: "ERROR"
+# 抑制推理服务相关警告
+logger.org.elasticsearch.xpack.inference.services.elastic.authorization.ElasticInferenceServiceAuthorizationHandler: "ERROR"
+logger.org.elasticsearch.xpack.inference: "ERROR"
 
 # 内存锁定（通过ulimits设置）
 bootstrap.memory_lock: false
+
+# 绕过Bootstrap Checks（开发环境配置）
+# 允许在禁用SSL的情况下启用安全功能
+discovery.seed_hosts: []
 
 # 线程池设置（单机优化）
 thread_pool.write.queue_size: 200

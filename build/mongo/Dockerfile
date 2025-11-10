@@ -5,12 +5,20 @@
 ARG MONGO_VERSION
 ARG CHANGE_SOURCE=false
 
-# 添加代理设置
-ARG http_proxy
-ARG https_proxy
-ARG no_proxy
-
 FROM debian:bookworm-slim
+
+# 添加代理设置
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+
+# 设置代理环境变量
+ENV http_proxy=${HTTP_PROXY}
+ENV https_proxy=${HTTPS_PROXY}
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+ENV no_proxy=${NO_PROXY}
+ENV NO_PROXY=${NO_PROXY}
 
 ENV TMP_DIR=/tmp/extensions
 

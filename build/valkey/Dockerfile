@@ -1,9 +1,17 @@
 FROM alpine:3.21
 
 # 添加代理设置
-ARG http_proxy
-ARG https_proxy
-ARG no_proxy
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+
+# 设置代理环境变量
+ENV http_proxy=${HTTP_PROXY}
+ENV https_proxy=${HTTPS_PROXY}
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+ENV no_proxy=${NO_PROXY}
+ENV NO_PROXY=${NO_PROXY}
 
 ARG VALKEY_VERSION
 ARG ALPINE_REPOSITORIES

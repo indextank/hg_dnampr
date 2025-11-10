@@ -1,0 +1,129 @@
+# ==========================================
+# MySQL 8.0.43 开发环境专用配置
+# ==========================================
+# 特点：调试友好、快速响应、较低资源消耗
+
+[mysqld]
+# ==========================================
+# 基础安全和兼容性配置
+# ==========================================
+# 禁用 NUMA 优化，解决容器环境 mbind 权限问题
+innodb_numa_interleave = 0
+
+# 认证插件配置 (MySQL 8.0+ 推荐)
+default_authentication_plugin = caching_sha2_password
+
+# SSL/TLS 配置 - 开发环境允许非加密连接 (MySQL 8.0.43 兼容语法)
+require_secure_transport = OFF
+tls_version = ''
+
+# ==========================================
+# 开发环境性能配置 (资源友好)
+# ==========================================
+# InnoDB 缓冲池 - 开发环境使用较小值
+innodb_buffer_pool_size = 512M
+innodb_buffer_pool_instances = 1
+
+# 日志配置 - 开发环境快速提交
+# 使用新的 MySQL 8.0 推荐参数替代废弃的 innodb_log_file_size
+innodb_redo_log_capacity = 256M
+innodb_log_buffer_size = 32M
+innodb_flush_log_at_trx_commit = 2
+innodb_flush_method = O_DIRECT
+
+# ==========================================
+# 连接和并发配置
+# ==========================================
+max_connections = 100
+max_connect_errors = 100000
+connect_timeout = 60
+wait_timeout = 600
+interactive_timeout = 600
+
+# ==========================================
+# 二进制日志配置 - 开发环境简化
+# ==========================================
+binlog_expire_logs_seconds = 259200
+
+log_bin = mysql-bin
+# 注意：binlog_format 在 MySQL 8.0.34+ 中被标记为废弃，但仍可使用
+# 建议在未来版本中通过会话级别设置：SET SESSION binlog_format = 'ROW';
+# binlog_format = ROW
+max_binlog_size = 100M
+sync_binlog = 0
+
+# ==========================================
+# 错误和慢查询日志 - 开发环境详细记录
+# ==========================================
+log_error = /var/log/mysql/error.log
+log_error_verbosity = 3
+
+# 慢查询日志 - 开发环境敏感
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/slow.log
+long_query_time = 2.0
+log_queries_not_using_indexes = 1
+
+# ==========================================
+# 字符集和排序规则
+# ==========================================
+character_set_server = utf8mb4
+collation_server = utf8mb4_unicode_ci
+init_connect = 'SET NAMES utf8mb4'
+
+# ==========================================
+# 开发环境特殊配置
+# ==========================================
+# 通用查询日志 - 开发环境可启用调试
+general_log = 0
+general_log_file = /var/log/mysql/general.log
+
+# 安全配置 - 开发环境相对宽松
+local_infile = 1
+
+# 安全文件操作路径（解决 secure-file-priv 警告）
+secure_file_priv = "/tmp"
+
+# PID 文件安全路径（解决 pid-file 警告）
+pid_file = /var/lib/mysql/mysql.pid
+
+# SQL 模式 - 开发环境略宽松但保持标准 (MySQL 8.0.43 兼容)
+# MySQL 8.0.43 兼容的 sql_mode 配置（移除了已废弃的 NO_AUTO_CREATE_USER）
+sql_mode = STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+
+# ==========================================
+# 表和索引配置
+# ==========================================
+innodb_file_per_table = 1
+innodb_open_files = 2000
+table_open_cache = 2000
+table_definition_cache = 1400
+
+# ==========================================
+# 内存和临时表配置
+# ==========================================
+tmp_table_size = 64M
+max_heap_table_size = 64M
+sort_buffer_size = 2M
+read_buffer_size = 256K
+read_rnd_buffer_size = 512K
+join_buffer_size = 2M
+
+# ==========================================
+# 其他优化配置
+# ==========================================
+innodb_thread_concurrency = 0
+innodb_lock_wait_timeout = 50
+innodb_rollback_on_timeout = 1
+
+# 主机缓存配置（替代废弃的 skip_name_resolve 和 skip-host-cache）
+skip_name_resolve = 1
+host_cache_size = 0
+
+[mysql]
+# 客户端配置
+default_character_set = utf8mb4
+
+[client]
+# 客户端默认字符集
+default_character_set = utf8mb4

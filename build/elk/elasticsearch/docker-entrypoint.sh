@@ -79,6 +79,12 @@ else
   POSITIONAL_PARAMETERS=""
 fi
 
+# 启动 Kibana 密码设置脚本（在后台运行，不阻塞 Elasticsearch 启动）
+# 注意：文件权限在构建时已设置，无需在运行时修改
+if [[ -f /usr/local/bin/setup-kibana-password.sh ]]; then
+  /usr/local/bin/setup-kibana-password.sh &
+fi
+
 # Signal forwarding and child reaping is handled by `tini`, which is the
 # actual entrypoint of the container
 exec /usr/share/elasticsearch/bin/elasticsearch "$@" $POSITIONAL_PARAMETERS <<<"$KEYSTORE_PASSWORD"

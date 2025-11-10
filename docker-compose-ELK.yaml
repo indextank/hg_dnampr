@@ -1,10 +1,12 @@
 x-common:
   &default-common
   restart: unless-stopped
-  env_file: ./.env
+  env_file:
+    - ./config/env/base.env
+    - ./config/env/elk.env
   dns:
-    - ${DNS:-223.5.5.5}
-    - ${DNS_BACKUP:-114.114.114.114}
+    - ${DNS_PRIMARY:-8.8.8.8}
+    - ${DNS_SECONDARY:-223.5.5.5}
   logging:
     driver: "json-file"
     options:
@@ -26,20 +28,49 @@ services:
         TINI_VERSION: ${TINI_VERSION}
         ELASTICSEARCH_PLUGINS: ${ELASTICSEARCH_PLUGINS:-}
         CHANGE_SOURCE: ${CHANGE_SOURCE:-false}
+      network: host
     container_name: elasticsearch
+    # user: "1000:1000"  # 暂时注释掉，使用init容器设置权限
+    # privileged: true
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       # 只保留JVM设置，移除所有Elasticsearch配置参数
-      ES_JAVA_OPTS: "-Xms512m -Xmx1g"
+      # 将 gc.log 输出到 logs 目录，避免权限问题（如果 ES_JAVA_OPTS 未设置 gc.log，则添加）
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx1g}
+      # 设置 gc.log 输出路径（如果 ES_JAVA_OPTS 中未包含 gc.log 配置，则通过环境变量设置）
+      # 注意：Elasticsearch 默认会在工作目录创建 gc.log，我们需要确保它输出到 logs 目录
+      # 如果 ES_JAVA_OPTS 已经包含了 gc.log 配置，这个环境变量会被忽略
       # 禁用AWS SDK日志记录来减少警告
       AWS_SDK_LOAD_CONFIG: "false"
+      # 禁用 AWS 相关功能（解决权限错误）
+      AWS_PROFILE: ""
+      AWS_CONFIG_FILE: ""
+      AWS_SHARED_CREDENTIALS_FILE: ""
+      AWS_DEFAULT_REGION: ""
+      AWS_ACCESS_KEY_ID: ""
+      AWS_SECRET_ACCESS_KEY: ""
+      # 禁用 AWS 配置文件自动发现
+      AWS_EC2_METADATA_DISABLED: "true"
+      AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: ""
       # 设置日志级别
       ELASTIC_CONTAINER: "true"
+      # 禁用 S3 仓库插件
+      REPOSITORIES_S3_ENABLED: "false"
+      # 设置Elasticsearch密码
+      ELASTIC_PASSWORD: ${KIBANA_ELASTICSEARCH_PASSWORD:-e123456}
+      # 设置Kibana用户密码（用于初始化脚本）
+      KIBANA_ELASTICSEARCH_PASSWORD: ${KIBANA_ELASTICSEARCH_PASSWORD:-GwGh_HxORLonWw3jSFk8}
+      # 安全配置（通过环境变量控制）
+      ELK_SECURITY_ENABLED: ${ELK_SECURITY_ENABLED:-false}
+      ELK_TRANSPORT_SSL_ENABLED: ${ELK_TRANSPORT_SSL_ENABLED:-false}
+      ELK_HTTP_SSL_ENABLED: ${ELK_HTTP_SSL_ENABLED:-false}
     volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-      - elasticsearch_logs:/usr/share/elasticsearch/logs
+      # 使用主机路径挂载（如果配置了），否则使用Docker volumes
+      - ${ELASTICSEARCH_DATA_PATH:-elasticsearch_data}:/usr/share/elasticsearch/data
+      - ${ELASTICSEARCH_LOG_DIR:-elasticsearch_logs}:/usr/share/elasticsearch/logs
       - ${ELASTICSEARCH_CONF_DIR:-./conf/elasticsearch}/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
       - ${ELASTICSEARCH_CONF_DIR:-./conf/elasticsearch}/log4j2.properties:/usr/share/elasticsearch/config/log4j2.properties:ro
+      - ${ELASTICSEARCH_CONF_DIR:-./conf/elasticsearch}/certs:/usr/share/elasticsearch/config/certs:ro
     hostname: elasticsearch
     ports:
       - "127.0.0.1:${ELASTICSEARCH_HOST_PORT:-9200}:9200"
@@ -55,7 +86,7 @@ services:
         soft: 4096
         hard: 4096
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health?timeout=10s | grep -E '\"status\":(\"green\"|\"yellow\")' || exit 1"]
+      test: ["CMD-SHELL", "if [ \"$$ELK_HTTP_SSL_ENABLED\" = \"true\" ]; then curl -f -s -k -u elastic:$$ELASTIC_PASSWORD https://localhost:9200/_cluster/health 2>/dev/null; else curl -f -s -u elastic:$$ELASTIC_PASSWORD http://localhost:9200/_cluster/health 2>/dev/null; fi"]
       interval: 30s
       timeout: 15s
       retries: 3
@@ -63,11 +94,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: "2g"
-          cpus: "1"
+          memory: "${ELASTICSEARCH_MEMORY_LIMIT:-4g}"
+          cpus: "${ELASTICSEARCH_CPU_LIMIT:-2}"
         reservations:
-          memory: "512m"
-          cpus: "0.25"
+          memory: "${ELASTICSEARCH_MEMORY_RESERVATION:-1024m}"
+          cpus: "${ELASTICSEARCH_CPU_RESERVATION:-0.5}"
     networks:
       - elk_network
 
@@ -81,6 +112,7 @@ services:
         ELK_VERSION: ${ELK_VERSION}
         TINI_VERSION: ${TINI_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE:-false}
+      network: host
     environment:
       TZ: "${TZ:-Asia/Shanghai}"
       # Node.js 内存配置（重要：解决堆内存不足问题）
@@ -90,10 +122,18 @@ services:
       SERVER_PORT: 5601
       SERVER_PUBLICBASEURL: ${KIBANA_PUBLIC_BASE_URL:-}
       SERVER_BASEPATH: ${KIBANA_BASE_PATH:-}
-      # Elasticsearch 连接
-      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
-      ELASTICSEARCH_USERNAME: ${KIBANA_ELASTICSEARCH_USERNAME:-}
-      ELASTICSEARCH_PASSWORD: ${KIBANA_ELASTICSEARCH_PASSWORD:-}
+      # Elasticsearch 连接（使用kibana_system账号）
+      # 协议通过环境变量控制：dev=http, prod=https
+      ELASTICSEARCH_HOSTS: ${ELASTICSEARCH_PROTOCOL:-http}://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: ${KIBANA_ELASTICSEARCH_USERNAME:-kibana_system}
+      ELASTICSEARCH_PASSWORD: ${KIBANA_ELASTICSEARCH_PASSWORD:-GwGh_HxORLonWw3jSFk8}
+      # SSL配置（生产环境）
+      ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES: /usr/share/kibana/certs/ca/ca.crt
+      ELASTICSEARCH_SSL_VERIFICATIONMODE: certificate
+      # 添加SSL证书路径环境变量（从elk.prod.env读取）
+      ELASTICSEARCH_SSL_CERTIFICATE_AUTHORITIES: ${ELK_SSL_CERTIFICATE_AUTHORITIES}
+      ELASTICSEARCH_SSL_CERTIFICATE: ${ELK_SSL_CERTIFICATE}
+      ELASTICSEARCH_SSL_KEY: ${ELK_SSL_KEY}
       # 本地化设置
       I18N_LOCALE: "${KIBANA_I18N_LOCALE:-zh-CN}"
       # 安全配置（禁用不必要的安全功能）
@@ -115,6 +155,7 @@ services:
       ELASTICSEARCH_HOSTS_ALLOWFROMURL: "true"
     volumes:
       - ${KIBANA_CONF_DIR:-./conf/kibana}:/usr/share/kibana/config:ro
+      - ${ELASTICSEARCH_CONF_DIR:-./conf/elasticsearch}/certs:/usr/share/kibana/certs:ro
       - kibana_data:/usr/share/kibana/data:rw
     hostname: kibana
     depends_on:
@@ -148,6 +189,7 @@ services:
       args:
         ELK_VERSION: ${ELK_VERSION}
         CHANGE_SOURCE: ${CHANGE_SOURCE:-false}
+      network: host
     hostname: logstash
     depends_on:
       elasticsearch:
@@ -167,11 +209,18 @@ services:
       CONFIG_RELOAD_INTERVAL: "3s"
       QUEUE_TYPE: "memory"
       QUEUE_MAX_EVENTS: "1000"
+      # Elasticsearch认证配置（供Pipeline使用）
+      ELASTICSEARCH_PROTOCOL: ${ELASTICSEARCH_PROTOCOL:-http}
+      ELASTICSEARCH_USERNAME: ${LOGSTASH_ELASTICSEARCH_USERNAME:-elastic}
+      ELASTICSEARCH_PASSWORD: ${KIBANA_ELASTICSEARCH_PASSWORD:-GwGh_HxORLonWw3jSFk8}
+      ELASTICSEARCH_SSL_CERTIFICATE_AUTHORITY: /usr/share/logstash/config/certs/ca/ca.crt
     volumes:
       # 使用配置目录挂载，给予读写权限
       - ${LOGSTASH_CONF_DIR:-./conf/logstash}:/usr/share/logstash/config:rw
       # Pipeline 配置目录
       - ${LOGSTASH_PIPELINE_CONF_DIR:-./conf/logstash/pipeline}:/usr/share/logstash/pipeline:ro
+      # SSL证书目录（生产环境需要）
+      - ${ELASTICSEARCH_CONF_DIR:-./conf/elasticsearch}/certs:/usr/share/logstash/config/certs:ro
       # 数据和日志目录需要写权限
       - logstash_data:/usr/share/logstash/data:rw
       - logstash_logs:/usr/share/logstash/logs:rw
@@ -179,7 +228,7 @@ services:
       - "127.0.0.1:${LOGSTASH_HOST_PORT_C:-9600}:9600"
       - "127.0.0.1:${LOGSTASH_HOST_PORT_S:-5044}:5044"
       - "127.0.0.1:${LOGSTASH_HOST_PORT_TCP:-5000}:5000"
-      - "127.0.0.1:${LOGSTASH_HOST_PORT_HTTP:-8080}:8080"
+      - "127.0.0.1:${LOGSTASH_HOST_PORT_HTTP:-8090}:8000"
     healthcheck:
       test: ["CMD-SHELL", "curl -s http://localhost:9600/?pretty | grep -q '\"status\":\"green\"' || exit 1"]
       interval: 30s
