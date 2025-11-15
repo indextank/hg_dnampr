@@ -363,8 +363,11 @@ build_services() {
         export MYSQL_BACKUP_IMAGE="$mysql_backup_image"
     fi
 
+    # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
+    local compose_cmd=$(get_docker_compose_cmd)
+    
     # 构建Docker命令
-    local docker_cmd="docker compose $compose_files build"
+    local docker_cmd="$compose_cmd $compose_files build"
 
     # 添加选项
     if [[ "$NO_CACHE" == "true" ]]; then
@@ -381,7 +384,7 @@ build_services() {
 
     if [[ "$FORCE_RECREATE" == "true" ]]; then
         # 如果是force-recreate，使用up命令而不是build
-        docker_cmd="docker compose $compose_files up --force-recreate"
+        docker_cmd="$compose_cmd $compose_files up --force-recreate"
         if [[ ${#final_services[@]} -gt 0 ]]; then
             docker_cmd="$docker_cmd ${final_services[*]}"
         fi
@@ -460,8 +463,9 @@ build_services() {
     # 推送镜像（如果需要）
     if [[ "$PUSH_IMAGE" == "true" ]]; then
         log "推送镜像到仓库..."
+        local compose_cmd=$(get_docker_compose_cmd)
         for service in "${final_services[@]}"; do
-            docker compose $compose_files push "$service" || warn "推送 $service 失败"
+            $compose_cmd $compose_files push "$service" || warn "推送 $service 失败"
         done
     fi
 

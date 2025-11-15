@@ -374,8 +374,11 @@ execute_compose_command() {
         info "检测到Web服务器 (${web_services[*]})，将在其他服务重启完成后最后重启"
     fi
     
+    # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
+    local compose_cmd=$(get_docker_compose_cmd)
+    
     # 构建Docker命令
-    local docker_cmd="docker compose $compose_files"
+    local docker_cmd="$compose_cmd $compose_files"
     
     case "$operation" in
         up|start)
@@ -484,7 +487,7 @@ execute_compose_command() {
                 
                 # 再重启Web服务器
                 info "步骤2: 重启Web服务器 (${web_services[*]})"
-                docker_cmd="docker compose $compose_files restart ${web_services[*]}"
+                docker_cmd="$compose_cmd $compose_files restart ${web_services[*]}"
                 eval "$docker_cmd"
                 return  # 提前返回，避免后面重复执行
             elif [[ ${#web_services[@]} -gt 0 && ${#final_services[@]} -eq 0 ]]; then
@@ -648,8 +651,11 @@ show_status() {
     # 显示所有compose文件的状态
     local compose_files="-f docker-compose.yaml -f docker-compose.${environment}.yaml"
     
+    # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
+    local compose_cmd=$(get_docker_compose_cmd)
+    
     echo -e "\n${CYAN}=== 主要服务状态 ===${NC}"
-    docker compose $compose_files ps 2>/dev/null || warn "无法获取主要服务状态"
+    $compose_cmd $compose_files ps 2>/dev/null || warn "无法获取主要服务状态"
     
     # 检查ELK服务是否真的存在和运行
     echo -e "\n${CYAN}=== ELK服务状态 ===${NC}"
@@ -657,7 +663,7 @@ show_status() {
         # 检查ELK compose文件中定义的服务是否有在运行
         local elk_containers=$(docker ps --filter "label=com.docker.compose.project=hg_dnmpr" --filter "label=com.docker.compose.config-hash" --format "{{.Names}}" | grep -E "elasticsearch|kibana|logstash" 2>/dev/null || echo "")
         if [[ -n "$elk_containers" ]]; then
-            docker compose -f docker-compose-ELK.yaml ps 2>/dev/null
+            $compose_cmd -f docker-compose-ELK.yaml ps 2>/dev/null
         else
             info "ELK服务未运行"
         fi
@@ -671,7 +677,7 @@ show_status() {
         # 检查SGR compose文件中定义的服务是否有在运行
         local sgr_containers=$(docker ps --filter "label=com.docker.compose.project=hg_dnmpr" --filter "label=com.docker.compose.config-hash" --format "{{.Names}}" | grep -E "spug|gitea|rap2" 2>/dev/null || echo "")
         if [[ -n "$sgr_containers" ]]; then
-            docker compose -f docker-compose-spug+gitea+rap2.yaml ps 2>/dev/null
+            $compose_cmd -f docker-compose-spug+gitea+rap2.yaml ps 2>/dev/null
         else
             info "SGR服务未运行"
         fi
@@ -906,8 +912,11 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             
             info "找到 ${#available_services[@]} 个已构建的服务: ${available_services[*]}"
             
+            # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
+            local compose_cmd=$(get_docker_compose_cmd)
+            
             # 只启动已构建的服务
-            docker_cmd="docker compose $compose_files up --no-build"
+            docker_cmd="$compose_cmd $compose_files up --no-build"
             if [[ "$DETACH" == "true" ]]; then
                 docker_cmd="$docker_cmd -d"
             fi
@@ -920,16 +929,19 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             ;;
         stop)
             log "停止所有正在运行的服务..."
+            # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
+            local compose_cmd=$(get_docker_compose_cmd)
+            
             # 停止主要服务
             compose_files=$(get_compose_files "$ENVIRONMENT")
-            docker compose $compose_files stop
+            $compose_cmd $compose_files stop
             
             # 停止ELK服务（如果存在且正在运行）
             if [[ -f "docker-compose-ELK.yaml" ]]; then
                 elk_containers=$(docker ps --filter "label=com.docker.compose.project=hg_dnmpr" --format "{{.Names}}" | grep -E "elasticsearch|kibana|logstash" 2>/dev/null || echo "")
                 if [[ -n "$elk_containers" ]]; then
                     info "停止ELK服务..."
-                    docker compose -f docker-compose-ELK.yaml stop
+                    $compose_cmd -f docker-compose-ELK.yaml stop
                 fi
             fi
             
@@ -938,7 +950,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                 sgr_containers=$(docker ps --filter "label=com.docker.compose.project=hg_dnmpr" --format "{{.Names}}" | grep -E "spug|gitea|rap2" 2>/dev/null || echo "")
                 if [[ -n "$sgr_containers" ]]; then
                     info "停止SGR服务..."
-                    docker compose -f docker-compose-spug+gitea+rap2.yaml stop
+                    $compose_cmd -f docker-compose-spug+gitea+rap2.yaml stop
                 fi
             fi
             
@@ -946,20 +958,23 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             ;;
         down)
             log "停止并卸载所有服务..."
+            # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
+            local compose_cmd=$(get_docker_compose_cmd)
+            
             # 停止并删除主要服务
             compose_files=$(get_compose_files "$ENVIRONMENT")
-            docker compose $compose_files down
+            $compose_cmd $compose_files down
             
             # 停止并删除ELK服务（如果存在）
             if [[ -f "docker-compose-ELK.yaml" ]]; then
                 info "停止并卸载ELK服务..."
-                docker compose -f docker-compose-ELK.yaml down 2>/dev/null || true
+                $compose_cmd -f docker-compose-ELK.yaml down 2>/dev/null || true
             fi
             
             # 停止并删除SGR服务（如果存在）
             if [[ -f "docker-compose-spug+gitea+rap2.yaml" ]]; then
                 info "停止并卸载SGR服务..."
-                docker compose -f docker-compose-spug+gitea+rap2.yaml down 2>/dev/null || true
+                $compose_cmd -f docker-compose-spug+gitea+rap2.yaml down 2>/dev/null || true
             fi
             
             # 清理所有容器（包括不在当前项目中定义的）
@@ -990,10 +1005,13 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             ;;
         restart)
             log "重启所有服务..."
+            # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
+            local compose_cmd=$(get_docker_compose_cmd)
+            
             compose_files=$(get_compose_files "$ENVIRONMENT")
             
             # 获取所有运行中的容器名称
-            running_containers=$(docker compose $compose_files ps --format "{{.Name}}" 2>/dev/null || echo "")
+            running_containers=$($compose_cmd $compose_files ps --format "{{.Name}}" 2>/dev/null || echo "")
             
             # 检查是否需要自动添加 mysql_backup 服务
             restart_services=()
@@ -1029,7 +1047,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                     
                     # 步骤1：重启其他服务
                     info "步骤1: 重启后端服务 (${running_other_services[*]})"
-                    docker compose $compose_files restart ${running_other_services[*]}
+                    $compose_cmd $compose_files restart ${running_other_services[*]}
                     
                     # 等待后端服务启动完成
                     info "等待后端服务启动完成..."
@@ -1037,21 +1055,21 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                     
                     # 步骤2：重启Web服务器
                     info "步骤2: 重启Web服务器 (${running_web_services[*]})"
-                    docker compose $compose_files restart ${running_web_services[*]}
+                    $compose_cmd $compose_files restart ${running_web_services[*]}
                     
                     success "所有服务重启完成"
                 else
                     # 如果只有Web服务器或只有其他服务，重启指定的服务
                     if [[ ${#restart_services[@]} -gt 0 ]]; then
-                        docker compose $compose_files restart ${restart_services[*]}
+                        $compose_cmd $compose_files restart ${restart_services[*]}
                     else
-                        docker compose $compose_files restart
+                        $compose_cmd $compose_files restart
                     fi
                     success "所有服务重启完成"
                 fi
             else
                 # 没有运行中的服务，正常重启
-                docker compose $compose_files restart
+                $compose_cmd $compose_files restart
                 success "所有服务重启完成"
             fi
             ;;

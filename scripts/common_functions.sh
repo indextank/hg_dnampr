@@ -387,6 +387,27 @@ check_no_params() {
     return 1
 }
 
+# 检测并返回正确的 Docker Compose 命令
+# 优先使用 docker compose（Docker Compose V2 插件）
+# 如果不存在，则使用 docker-compose（独立工具）
+get_docker_compose_cmd() {
+    # 检查 docker compose 是否可用
+    if docker compose version >/dev/null 2>&1; then
+        echo "docker compose"
+        return 0
+    fi
+    
+    # 检查 docker-compose 是否可用
+    if docker-compose --version >/dev/null 2>&1; then
+        echo "docker-compose"
+        return 0
+    fi
+    
+    # 如果都不可用，返回错误
+    error "未找到 Docker Compose 命令，请安装 docker-compose 或 Docker Compose V2 插件"
+    return 1
+}
+
 # 显示build.sh帮助信息
 show_build_help() {
     cat << EOF
