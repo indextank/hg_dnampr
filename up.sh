@@ -913,7 +913,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             info "找到 ${#available_services[@]} 个已构建的服务: ${available_services[*]}"
             
             # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
-            local compose_cmd=$(get_docker_compose_cmd)
+            compose_cmd=$(get_docker_compose_cmd)
             
             # 只启动已构建的服务
             docker_cmd="$compose_cmd $compose_files up --no-build"
@@ -930,7 +930,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
         stop)
             log "停止所有正在运行的服务..."
             # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
-            local compose_cmd=$(get_docker_compose_cmd)
+            compose_cmd=$(get_docker_compose_cmd)
             
             # 停止主要服务
             compose_files=$(get_compose_files "$ENVIRONMENT")
@@ -959,7 +959,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
         down)
             log "停止并卸载所有服务..."
             # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
-            local compose_cmd=$(get_docker_compose_cmd)
+            compose_cmd=$(get_docker_compose_cmd)
             
             # 停止并删除主要服务
             compose_files=$(get_compose_files "$ENVIRONMENT")
@@ -1006,20 +1006,35 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
         restart)
             log "重启所有服务..."
             # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
-            local compose_cmd=$(get_docker_compose_cmd)
+            compose_cmd=$(get_docker_compose_cmd)
             
             compose_files=$(get_compose_files "$ENVIRONMENT")
             
-            # 获取所有运行中的容器名称
+            # 获取所有运行中的容器名称（包括主服务和ELK服务）
             running_containers=$($compose_cmd $compose_files ps --format "{{.Name}}" 2>/dev/null || echo "")
+            
+            # 如果存在ELK compose文件，也获取ELK服务的容器
+            if [[ -f "docker-compose-ELK.yaml" ]]; then
+                elk_running_containers=$($compose_cmd -f docker-compose-ELK.yaml ps --format "{{.Name}}" 2>/dev/null || echo "")
+                if [[ -n "$elk_running_containers" ]]; then
+                    # 合并ELK容器到主容器列表
+                    running_containers=$(echo -e "$running_containers\n$elk_running_containers")
+                fi
+            fi
             
             # 检查是否需要自动添加 mysql_backup 服务
             restart_services=()
+            elk_services=()
             if [[ -n "$running_containers" ]]; then
-                # 将运行中的容器转换为数组
+                # 将运行中的容器转换为数组，并分离ELK服务
                 while IFS= read -r container_name; do
                     if [[ -n "$container_name" ]]; then
-                        restart_services+=("$container_name")
+                        # 检查是否是ELK服务
+                        if [[ "$container_name" == "elasticsearch" || "$container_name" == "kibana" || "$container_name" == "logstash" ]]; then
+                            elk_services+=("$container_name")
+                        else
+                            restart_services+=("$container_name")
+                        fi
                     fi
                 done <<< "$running_containers"
                 
@@ -1057,6 +1072,16 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                     info "步骤2: 重启Web服务器 (${running_web_services[*]})"
                     $compose_cmd $compose_files restart ${running_web_services[*]}
                     
+                    # 步骤3：重启ELK服务（如果存在）
+                    if [[ ${#elk_services[@]} -gt 0 ]]; then
+                        info "步骤3: 重启ELK服务 (${elk_services[*]})"
+                        if [[ -f "docker-compose-ELK.yaml" ]]; then
+                            $compose_cmd -f docker-compose-ELK.yaml restart ${elk_services[*]}
+                        else
+                            warn "未找到 docker-compose-ELK.yaml 文件，跳过ELK服务重启"
+                        fi
+                    fi
+                    
                     success "所有服务重启完成"
                 else
                     # 如果只有Web服务器或只有其他服务，重启指定的服务
@@ -1065,12 +1090,34 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                     else
                         $compose_cmd $compose_files restart
                     fi
+                    
+                    # 重启ELK服务（如果存在）
+                    if [[ ${#elk_services[@]} -gt 0 ]]; then
+                        info "重启ELK服务 (${elk_services[*]})"
+                        if [[ -f "docker-compose-ELK.yaml" ]]; then
+                            $compose_cmd -f docker-compose-ELK.yaml restart ${elk_services[*]}
+                        else
+                            warn "未找到 docker-compose-ELK.yaml 文件，跳过ELK服务重启"
+                        fi
+                    fi
+                    
                     success "所有服务重启完成"
                 fi
             else
-                # 没有运行中的服务，正常重启
-                $compose_cmd $compose_files restart
-                success "所有服务重启完成"
+                # 没有运行中的主服务，检查是否有ELK服务需要重启
+                if [[ ${#elk_services[@]} -gt 0 ]]; then
+                    info "重启ELK服务 (${elk_services[*]})"
+                    if [[ -f "docker-compose-ELK.yaml" ]]; then
+                        $compose_cmd -f docker-compose-ELK.yaml restart ${elk_services[*]}
+                        success "ELK服务重启完成"
+                    else
+                        warn "未找到 docker-compose-ELK.yaml 文件，跳过ELK服务重启"
+                    fi
+                else
+                    # 正常重启
+                    $compose_cmd $compose_files restart
+                    success "所有服务重启完成"
+                fi
             fi
             ;;
         *)

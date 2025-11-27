@@ -46,7 +46,10 @@ services:
            memory: ${REDIS_RESERVATIONS_MEMORY}
     restart: unless-stopped  # 或 always
     networks:
-      - default
+      default:
+        aliases:
+          - redis  # 添加redis别名，支持使用redis或valkey作为服务名
+          - valkey
     # sysctls:
     #   - net.core.somaxconn=1024
 
@@ -143,6 +146,7 @@ services:
     networks:
       default:
         aliases:
+          - mysql  # 添加mysql别名，支持使用mysql或mysql-server作为服务名
           - mysql-server
     deploy:
      resources:

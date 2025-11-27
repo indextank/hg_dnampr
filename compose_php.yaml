@@ -71,6 +71,14 @@ volumes:
   php_sessions:
     driver: local
 
+# ==========================================
+# 网络定义
+# ==========================================
+networks:
+  elk_network:
+    external: true
+    name: elk_network
+
 services:
 
   ################  php84 #############################
@@ -146,6 +154,10 @@ services:
     ports:
       - "${PHP84_PORT}:88"
     restart: unless-stopped  # 或 always
+    # 网络配置 - 连接到default网络和elk_network以便访问数据库和Elasticsearch
+    networks:
+      - default
+      - elk_network
     # 标签配置
     labels:
       - "traefik.enable=true"
@@ -212,7 +224,10 @@ services:
 
     ports:
       - "${PHP83_PORT}:88"
-
+    # 网络配置 - 连接到default网络和elk_network以便访问数据库和Elasticsearch
+    networks:
+      - default
+      - elk_network
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.php83.rule=Host(`${PHP83_SERVER_NAME}`)"
@@ -278,6 +293,10 @@ services:
     ports:
       - "${PHP82_PORT}:88"
     restart: unless-stopped  # 或 always
+    # 网络配置 - 连接到default网络和elk_network以便访问数据库和Elasticsearch
+    networks:
+      - default
+      - elk_network
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.php82.rule=Host(`${PHP82_SERVER_NAME}`)"
@@ -330,7 +349,10 @@ services:
 
     ports:
       - "${PHP81_PORT}:88"
-
+    # 网络配置 - 连接到default网络和elk_network以便访问数据库和Elasticsearch
+    networks:
+      - default
+      - elk_network
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.php81.rule=Host(`${PHP81_SERVER_NAME}`)"
@@ -383,7 +405,10 @@ services:
 
     ports:
       - "${PHP80_PORT}:88"
-
+    # 网络配置 - 连接到default网络和elk_network以便访问数据库和Elasticsearch
+    networks:
+      - default
+      - elk_network
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.php80.rule=Host(`${PHP80_SERVER_NAME}`)"
@@ -437,6 +462,10 @@ services:
     ports:
       - "${PHP74_PORT}:88"
     restart: unless-stopped  # 或 always
+    # 网络配置 - 连接到default网络和elk_network以便访问数据库和Elasticsearch
+    networks:
+      - default
+      - elk_network
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.php74.rule=Host(`${PHP74_SERVER_NAME}`)"
@@ -488,7 +517,10 @@ services:
 
     ports:
       - "${PHP72_PORT}:88"
-
+    # 网络配置 - 连接到default网络和elk_network以便访问数据库和Elasticsearch
+    networks:
+      - default
+      - elk_network
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.php72.rule=Host(`${PHP72_SERVER_NAME}`)"

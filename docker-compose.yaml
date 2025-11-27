@@ -119,6 +119,9 @@ networks:
     driver_opts:
       com.docker.network.enable_ipv6: 0
     internal: false
+  elk_network:
+    external: true
+    name: elk_network
 
 volumes:
   mysql_data:

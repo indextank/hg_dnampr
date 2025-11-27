@@ -25,6 +25,7 @@ docker-compose.local.yml
 /docker-data/
 /volumes/
 .dockerignore.bak
+acme_renew_domain_cert.sh
 
 # 日志文件
 logs/
