@@ -55,6 +55,7 @@ RUN set -eux; \
 		libpq-dev \
 		libpsl-dev \
 		libreadline-dev \
+		libffi-dev \
 		libsodium-dev \
 		libsqlite3-dev \
 		libssl-dev \
@@ -475,6 +476,7 @@ RUN set -eux; \
 		$(test "$phpVersionId" = "8.2" && echo '--enable-zts --with-openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-iconv --with-password-argon2 --with-avif') \
 		$(test "$phpVersionId" = "8.3" && echo '--enable-zts --with-openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-iconv --with-password-argon2 --with-avif') \
 		$(test "$phpVersionId" = "8.4" && echo '--enable-zts --with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-iconv --with-password-argon2 --with-avif') \
+		$(test "$phpVersionId" = "8.5" && echo '--enable-zts --with-openssl=/usr/local/openssl --with-sodium=/usr/local --with-zip --enable-gd --with-webp --with-freetype --with-xpm --with-jpeg --with-iconv --with-password-argon2 --with-avif --with-ffi') \
 		--enable-option-checking=fatal \
 		--enable-mbstring \
 		--enable-ftp \
@@ -613,6 +615,7 @@ RUN set -eux; \
 		ca-certificates \
 		libreadline8 \
 		libsodium23 \
+		libffi8 \
 		zlib1g \
 		zlib1g-dev \
 		libxslt1.1 \
@@ -632,6 +635,18 @@ RUN set -eux; \
 	mkdir -p "$APACHE_LOG_DIR" "$APACHE_RUN_DIR" "$APACHE_LOCK_DIR" "$APACHE_RUN_DIR/socks"; \
 	chown -R "$APACHE_RUN_USER:$APACHE_RUN_GROUP" /var/www/html "$APACHE_LOG_DIR" "$APACHE_RUN_DIR"; \
 	chmod 777 "$APACHE_LOG_DIR" "$APACHE_RUN_DIR" "$APACHE_LOCK_DIR" "$APACHE_RUN_DIR/socks"
+
+# 禁用 IPv6 优先解析，强制优先使用 IPv4，避免 DNS 解析等待
+RUN set -eux; \
+	if [ -f /etc/gai.conf ]; then \
+		sed -ri 's/^#(precedence ::ffff:0:0\/96[[:space:]]+100)/\1/' /etc/gai.conf; \
+		sed -ri 's/^#(label ::ffff:0:0\/96[[:space:]]+4)/\1/' /etc/gai.conf; \
+	else \
+		{ \
+			echo 'precedence ::ffff:0:0/96  100'; \
+			echo 'label ::ffff:0:0/96  4'; \
+		} > /etc/gai.conf; \
+	fi
 
 # 从构建阶段复制文件
 COPY --from=php-builder /usr/local/ /usr/local/
@@ -747,4 +762,4 @@ LABEL maintainer="PHP Docker Team" \
       org.opencontainers.image.title="PHP-Apache Optimized" \
       org.opencontainers.image.description="Multi-stage optimized PHP with Apache2" \
       org.opencontainers.image.vendor="Your Organization" \
-      org.opencontainers.image.licenses="MIT" 
+      org.opencontainers.image.licenses="MIT"

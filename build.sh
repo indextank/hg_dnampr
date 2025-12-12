@@ -9,6 +9,10 @@
 
 set -euo pipefail
 
+# 禁用 Docker Compose 的 buildx/bake 警告
+export DOCKER_BUILDKIT=0
+export COMPOSE_DOCKER_CLI_BUILD=0
+
 # 脚本配置
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR"
@@ -24,17 +28,17 @@ DEFAULT_NO_PROXY="localhost,127.0.0.1"
 # 加载分层配置文件中的代理设置
 load_proxy_config() {
     local config_dir="$SCRIPT_DIR/config/env"
-    
+
     # 检查并加载base.env中的代理配置
     if [[ -f "$config_dir/base.env" ]]; then
         while IFS='=' read -r key value; do
             # 跳过注释和空行
             [[ "$key" =~ ^[[:space:]]*# ]] && continue
             [[ -z "$key" ]] && continue
-            
+
             # 去掉值中的注释部分和空格
             value=$(echo "$value" | sed 's/[[:space:]]*#.*$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            
+
             case "$key" in
                 HTTP_PROXY)
                     if [[ -n "$value" ]]; then
@@ -186,6 +190,7 @@ is_wsl_environment() {
 map_service_name() {
     local service="$1"
     case "$service" in
+        php85) echo "php85_apache" ;;
         php84) echo "php84_apache" ;;
         php83) echo "php83_apache" ;;
         php82) echo "php82_apache" ;;
@@ -253,7 +258,7 @@ get_special_services() {
             echo ""  # SGR通常构建整个栈
             ;;
         all)
-            echo "nginx php84_apache php82_apache php74_apache mysql mysql_backup redis valkey"
+            echo "nginx php85_apache php84_apache php82_apache php74_apache mysql mysql_backup redis valkey"
             ;;
         *)
             echo ""
@@ -311,7 +316,7 @@ build_services() {
     # 处理特殊组合
     local final_services=()
     local auto_add_mysql_backup=false
-    
+
     # 检查是否包含 mysql 服务，如果是则自动添加 mysql_backup
     for service in "${services[@]}"; do
         if [[ "$service" == "mysql" ]]; then
@@ -319,7 +324,7 @@ build_services() {
             break
         fi
     done
-    
+
     for service in "${services[@]}"; do
         local special_services=$(get_special_services "$service")
         if [[ -n "$special_services" ]]; then
@@ -332,7 +337,7 @@ build_services() {
             final_services+=($(map_service_name "$service"))
         fi
     done
-    
+
     # 如果检测到 mysql 服务，自动添加 mysql_backup
     if [[ "$auto_add_mysql_backup" == "true" ]]; then
         # 检查是否已经包含 mysql_backup，避免重复添加
@@ -343,12 +348,12 @@ build_services() {
                 break
             fi
         done
-        
+
         if [[ "$has_mysql_backup" == "false" ]]; then
             final_services+=("mysql_backup")
             info "检测到 MySQL 服务，自动添加 mysql_backup 服务"
         fi
-        
+
         # 根据构建的MySQL版本设置mysql_backup使用的镜像
         local mysql_backup_image="hg_dnmpr-mysql:latest"
         for service in "${services[@]}"; do
@@ -358,14 +363,14 @@ build_services() {
                 break
             fi
         done
-        
+
         # 导出环境变量供docker-compose使用
         export MYSQL_BACKUP_IMAGE="$mysql_backup_image"
     fi
 
     # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
     local compose_cmd=$(get_docker_compose_cmd)
-    
+
     # 构建Docker命令
     local docker_cmd="$compose_cmd $compose_files build"
 
@@ -406,7 +411,7 @@ build_services() {
     # 设置Docker构建环境变量
     export DOCKER_BUILDKIT=1
     export COMPOSE_DOCKER_CLI_BUILD=1
-    
+
     # 检测网络连接，如果无法访问 Docker Hub，自动启用国内镜像源
     if [[ "${CHANGE_SOURCE:-false}" != "true" ]]; then
         info "检测网络连接..."
@@ -431,7 +436,7 @@ build_services() {
             export CHANGE_SOURCE=false
         fi
     fi
-    
+
     # 确保代理环境变量被正确导出到Docker构建过程
     if [[ -n "${HTTP_PROXY:-}" ]]; then
         export HTTP_PROXY="$HTTP_PROXY"
@@ -440,7 +445,7 @@ build_services() {
         export HTTP_PROXY=""
         info "HTTP_PROXY未设置，使用空值"
     fi
-    
+
     if [[ -n "${HTTPS_PROXY:-}" ]]; then
         export HTTPS_PROXY="$HTTPS_PROXY"
         info "设置HTTPS_PROXY: $HTTPS_PROXY"
@@ -448,7 +453,7 @@ build_services() {
         export HTTPS_PROXY=""
         info "HTTPS_PROXY未设置，使用空值"
     fi
-    
+
     if [[ -n "${NO_PROXY:-}" ]]; then
         export NO_PROXY="$NO_PROXY"
         info "设置NO_PROXY: $NO_PROXY"
@@ -493,7 +498,7 @@ fi
 while [[ $# -gt 0 ]]; do
     case $1 in
         # 服务名
-        php84|php83|php82|php81|php80|php74|php72|nginx|tengine|mysql|mysql_backup|redis|valkey|mongo|postgres|elk|sgr|all)
+        php85|php84|php83|php82|php81|php80|php74|php72|nginx|tengine|mysql|mysql_backup|redis|valkey|mongo|postgres|elk|sgr|all)
             SERVICES+=("$1")
             shift
             ;;
@@ -567,7 +572,7 @@ if [[ " ${SERVICES[@]} " =~ " elk " ]] || [[ " ${SERVICES[@]} " =~ " elasticsear
         staging|stage) env_name="staging" ;;
         *) env_name="dev" ;;  # 默认为dev
     esac
-    
+
     # 检查ELK环境配置文件
     config_dir="$PROJECT_DIR/config/env"
     elk_env_file="$config_dir/elk.${env_name}.env"
@@ -606,16 +611,19 @@ for service in "${SERVICES[@]}"; do
     if [[ "$service" == "all" ]]; then
         # 获取 all 对应的服务列表
         all_services=$(get_special_services "all")
-        
+
         echo -e "\n${CYAN}${BOLD}=== 即将构建以下服务 ===${NC}"
         echo -e "${YELLOW}环境类型: ${ENVIRONMENT}${NC}"
         echo -e "${YELLOW}构建服务列表:${NC}"
-        
+
         # 逐行显示服务
         for svc in $all_services; do
             case "$svc" in
                 nginx)
                     echo -e "  • ${GREEN}nginx${NC}          - 标准的Nginx Web服务器"
+                    ;;
+                php85)
+                    echo -e "  • ${GREEN}php85_apache${NC}   - PHP 8.5 + Apache 服务器"
                     ;;
                 php84)
                     echo -e "  • ${GREEN}php84_apache${NC}   - PHP 8.4 + Apache 服务器"
@@ -640,17 +648,17 @@ for service in "${SERVICES[@]}"; do
                     ;;
             esac
         done
-        
+
         echo -e "\n${YELLOW}${BOLD}⚠️  注意: 构建过程可能需要较长时间，请确保网络连接稳定${NC}"
         echo -e "${RED}${BOLD}如需取消构建，请按 Ctrl+C${NC}\n"
-        
+
         # 倒计时15秒
         for i in {15..1}; do
             echo -ne "${YELLOW}${BOLD}构建将在 $i 秒后开始...\r${NC}"
             sleep 1
         done
         echo -e "${GREEN}${BOLD}开始构建！${NC}\n"
-        
+
         break  # 找到 all 参数后退出循环
     fi
 done

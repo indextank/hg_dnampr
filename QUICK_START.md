@@ -7,6 +7,7 @@
 ## ⚡ 一键启动
 
 ### 1. 环境准备
+
 ```bash
 # 确保Docker和Docker Compose已安装
 docker --version
@@ -18,6 +19,7 @@ cd hg_dnmpr
 ```
 
 ### 2. 快速启动（推荐）
+
 ```bash
 # 一键构建并启动所有服务
 ./build.sh all --auto-prune --auto-up
@@ -28,6 +30,7 @@ cd hg_dnmpr
 ```
 
 ### 3. 开发环境快速启动
+
 ```bash
 # 最常用的开发环境组合
 ./build.sh nginx php84 mysql redis --auto-up
@@ -35,17 +38,18 @@ cd hg_dnmpr
 
 ## 🌐 默认访问地址
 
-| 服务 | 地址 | 说明 |
-|------|------|------|
+| 服务    | 地址                      | 说明        |
+| ------- | ------------------------- | ----------- |
 | PHP 8.4 | https://php84.default.com | 最新PHP版本 |
-| PHP 8.3 | https://php83.default.com | PHP 8.3 |
-| PHP 8.2 | https://php82.default.com | PHP 8.2 |
-| PHP 8.1 | https://php81.default.com | PHP 8.1 |
-| PHP 8.0 | https://php80.default.com | PHP 8.0 |
-| PHP 7.4 | https://php74.default.com | PHP 7.4 |
-| PHP 7.2 | https://php72.default.com | PHP 7.2 |
+| PHP 8.3 | https://php83.default.com | PHP 8.3     |
+| PHP 8.2 | https://php82.default.com | PHP 8.2     |
+| PHP 8.1 | https://php81.default.com | PHP 8.1     |
+| PHP 8.0 | https://php80.default.com | PHP 8.0     |
+| PHP 7.4 | https://php74.default.com | PHP 7.4     |
+| PHP 7.2 | https://php72.default.com | PHP 7.2     |
 
 **本地开发**：修改 hosts 文件添加域名解析
+
 ```bash
 # Windows: C:\Windows\System32\drivers\etc\hosts
 # Linux/Mac: /etc/hosts
@@ -55,6 +59,7 @@ cd hg_dnmpr
 ## 🛠️ 常用命令
 
 ### 构建命令
+
 ```bash
 # 构建特定服务
 ./build.sh nginx php84 mysql redis
@@ -67,6 +72,7 @@ cd hg_dnmpr
 ```
 
 ### 服务管理
+
 ```bash
 # 启动服务
 ./up.sh nginx php84 mysql redis
@@ -82,6 +88,7 @@ cd hg_dnmpr
 ```
 
 ### 特殊组合
+
 ```bash
 # ELK日志分析栈
 ./build.sh elk --auto-up
@@ -96,6 +103,7 @@ cd hg_dnmpr
 ## ⚙️ 配置说明
 
 ### 分层配置文件
+
 项目采用分层配置管理，配置文件位于 `config/env/` 目录：
 
 - `base.env` - 基础配置（代理、时区、路径等）
@@ -107,7 +115,9 @@ cd hg_dnmpr
 - `apps.env` - 应用服务配置
 
 ### 端口配置
+
 默认端口配置（可在 `php.env` 中修改）：
+
 - PHP 8.4: 8084
 - PHP 8.3: 8083
 - PHP 8.2: 8082
@@ -119,6 +129,7 @@ cd hg_dnmpr
 ## 🔧 故障排除
 
 ### 权限问题
+
 ```bash
 # 给脚本添加执行权限
 chmod +x build.sh up.sh
@@ -128,7 +139,9 @@ find build/ -name "*entrypoint*" -type f -exec chmod +x {} \;
 ```
 
 ### 端口冲突
+
 检查并修改配置文件中的端口：
+
 ```bash
 # 查看端口占用
 netstat -tulpn | grep :8084
@@ -138,6 +151,7 @@ vim config/env/php.env
 ```
 
 ### 清理Docker垃圾
+
 ```bash
 # 标准清理
 docker system prune -f
@@ -147,6 +161,7 @@ docker system prune -a -f --volumes
 ```
 
 ### 查看日志
+
 ```bash
 # 查看容器日志
 docker logs [容器名] --follow
@@ -175,6 +190,7 @@ hg_dnmpr/
 ## 🎯 最佳实践
 
 ### 开发环境
+
 ```bash
 # 快速启动开发环境
 ./build.sh nginx php84 mysql redis --auto-up
@@ -184,6 +200,7 @@ hg_dnmpr/
 ```
 
 ### 生产环境
+
 ```bash
 # 生产环境完整部署
 ./build.sh all prod --no-cache --auto-prune --auto-up
@@ -193,6 +210,7 @@ hg_dnmpr/
 ```
 
 ### 性能优化
+
 ```bash
 # 并行构建
 ./build.sh nginx php84 --parallel
@@ -209,4 +227,4 @@ hg_dnmpr/
 
 ---
 
-**快速开始完成！** 🎉 如有问题，请查看详细文档或提交Issue。 
+**快速开始完成！** 🎉 如有问题，请查看详细文档或提交Issue。

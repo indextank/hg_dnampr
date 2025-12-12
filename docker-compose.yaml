@@ -1,129 +1,126 @@
-x-common-variables:
-  &default-common
-  restart: unless-stopped
-  env_file:
-    - ./config/env/base.env
-    - ./config/env/web.env
-    - ./config/env/php.env
-    - ./config/env/database.env
-    - ./config/env/redis.env
-  dns:
-    - ${DNS_PRIMARY:-223.5.5.5}
-    - ${DNS_SECONDARY:-114.114.114.114}
+x-common-variables: &default-common
+    restart: unless-stopped
+    env_file:
+        - ./config/env/base.env
+        - ./config/env/web.env
+        - ./config/env/php.env
+        - ./config/env/database.env
+        - ./config/env/redis.env
+    dns:
+        - ${DNS_PRIMARY:-223.5.5.5}
+        - ${DNS_SECONDARY:-114.114.114.114}
 
 services:
+    ################   nginx  ########################
+    nginx:
+        extends:
+            file: compose_web.yaml
+            service: nginx-server
+        depends_on:
+            php74_apache:
+                condition: service_healthy
+            php82_apache:
+                condition: service_healthy
+            php84_apache:
+                condition: service_healthy
 
-################   nginx  ########################
-  nginx:
-    extends:
-      file: compose_web.yaml
-      service: nginx-server
-    depends_on:
-      php74_apache:
-        condition: service_healthy
-      php82_apache:
-        condition: service_healthy
-      php84_apache:
-        condition: service_healthy
+    tengine:
+        extends:
+            file: compose_web.yaml
+            service: tengine-server
 
-  tengine:
-    extends:
-      file: compose_web.yaml
-      service: tengine-server
+    ################   valkey  ########################
+    valkey:
+        extends:
+            file: compose_databases.yaml
+            service: valkey-server
 
+    ################   redis  ########################
+    redis:
+        extends:
+            file: compose_databases.yaml
+            service: redis-server
 
-################   valkey  ########################
-  valkey:
-    extends:
-      file: compose_databases.yaml
-      service: valkey-server
+    ################   mongo  ########################
+    mongo:
+        extends:
+            file: compose_databases.yaml
+            service: mongo-server
 
-################   redis  ########################
-  redis:
-    extends:
-      file: compose_databases.yaml
-      service: redis-server
+    ################  MySQL ########################
+    mysql:
+        extends:
+            file: compose_databases.yaml
+            service: mysql-server
+    mysql_backup:
+        extends:
+            file: compose_databases.yaml
+            service: mysql-backup
 
+    ################   postgres  ########################
+    postgres:
+        extends:
+            file: compose_databases.yaml
+            service: postgres-server
 
-################   mongo  ########################
-  mongo:
-    extends:
-      file: compose_databases.yaml
-      service: mongo-server
+    pgadmin:
+        extends:
+            file: compose_databases.yaml
+            service: pgadmin-server
 
+    ################  PHP ########################
+    php85_apache:
+        extends:
+            file: compose_php.yaml
+            service: php85_apache
 
-################  MySQL ########################
-  mysql:
-    extends:
-      file: compose_databases.yaml
-      service: mysql-server
-  mysql_backup:
-    extends:
-      file: compose_databases.yaml
-      service: mysql-backup
+    php84_apache:
+        extends:
+            file: compose_php.yaml
+            service: php84_apache
 
+    php83_apache:
+        extends:
+            file: compose_php.yaml
+            service: php83_apache
 
-################   postgres  ########################
-  postgres:
-    extends:
-      file: compose_databases.yaml
-      service: postgres-server
+    php82_apache:
+        extends:
+            file: compose_php.yaml
+            service: php82_apache
 
-  pgadmin:
-    extends:
-      file: compose_databases.yaml
-      service: pgadmin-server
+    php81_apache:
+        extends:
+            file: compose_php.yaml
+            service: php81_apache
 
-################  PHP ########################
-  php84_apache:
-    extends:
-      file: compose_php.yaml
-      service: php84_apache
+    php80_apache:
+        extends:
+            file: compose_php.yaml
+            service: php80_apache
 
-  php83_apache:
-    extends:
-      file: compose_php.yaml
-      service: php83_apache
+    php74_apache:
+        extends:
+            file: compose_php.yaml
+            service: php74_apache
 
-  php82_apache:
-    extends:
-      file: compose_php.yaml
-      service: php82_apache
-
-  php81_apache:
-    extends:
-      file: compose_php.yaml
-      service: php81_apache
-
-  php80_apache:
-    extends:
-      file: compose_php.yaml
-      service: php80_apache
-
-  php74_apache:
-    extends:
-      file: compose_php.yaml
-      service: php74_apache
-
-  php72_apache:
-    extends:
-      file: compose_php.yaml
-      service: php72_apache
-
+    php72_apache:
+        extends:
+            file: compose_php.yaml
+            service: php72_apache
 
 networks:
-  default:
-    driver: bridge
-  postgres_access:
-    driver: bridge
-    driver_opts:
-      com.docker.network.enable_ipv6: 0
-    internal: false
-  elk_network:
-    external: true
-    name: elk_network
+    default:
+        driver: bridge
+        name: hg_dnmpr_network
+        driver_opts:
+            com.docker.network.enable_ipv6: "false"
+            com.docker.network.bridge.name: br-hg-dnmpr
+        ipam:
+            config:
+                - subnet: 172.20.0.0/24
 
 volumes:
-  mysql_data:
-  pgadmin:
-  php_sessions:
+    mysql_data:
+    pgadmin:
+    php_sessions:

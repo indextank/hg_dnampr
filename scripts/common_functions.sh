@@ -56,12 +56,13 @@ success() {
 # 配置Docker容器别名
 setup_docker_aliases() {
     local script_name="${1:-common}"
-    
+
     # 定义所有别名
     local aliases=(
         "alias dphp74='docker exec -it php74_apache /bin/bash'"
         "alias dphp82='docker exec -it php82_apache /bin/bash'"
         "alias dphp84='docker exec -it php84_apache /bin/bash'"
+        "alias dphp85='docker exec -it php85_apache /bin/bash'"
         "alias dnginx='docker exec -it nginx /bin/bash'"
         "alias dmysql='docker exec -it mysql /bin/bash'"
         "alias dmongo='docker exec -it mongo /bin/bash'"
@@ -69,15 +70,15 @@ setup_docker_aliases() {
         "alias dredis='docker exec -it redis /bin/bash'"
         "alias dpostgres='docker exec -it postgres /bin/bash'"
     )
-    
+
     # 检测当前shell类型
     local current_shell=""
     local config_file=""
-    
+
     # 检测WSL环境并设置正确的HOME路径
     local user_home=""
     local current_user=$(whoami)
-    
+
     if [[ -n "${WSL_DISTRO_NAME:-}" ]] || [[ "$(uname -r)" =~ microsoft|WSL ]]; then
         # WSL环境，检查是否是root用户
         if [[ "$current_user" == "root" ]]; then
@@ -100,7 +101,7 @@ setup_docker_aliases() {
             user_home="/home/$current_user"
         fi
     fi
-    
+
     if [[ -n "${BASH_VERSION:-}" ]]; then
         current_shell="bash"
         config_file="$user_home/.bashrc"
@@ -126,12 +127,12 @@ setup_docker_aliases() {
             config_file="$user_home/.bashrc"
         fi
     fi
-    
+
     if [[ "$script_name" == "build" ]]; then
         info "检测到shell类型: $current_shell"
         info "配置文件路径: $config_file"
     fi
-    
+
     # 确保配置文件目录存在
     local config_dir=$(dirname "$config_file")
     if [[ ! -d "$config_dir" ]]; then
@@ -148,13 +149,13 @@ setup_docker_aliases() {
             mkdir -p "$config_dir" 2>/dev/null || error "无法创建配置文件目录: $config_dir"
         }
     fi
-    
+
     # 确保配置文件存在
     if [[ ! -f "$config_file" ]]; then
         info "配置文件不存在，创建: $config_file"
         touch "$config_file" 2>/dev/null || error "无法创建配置文件: $config_file"
     fi
-    
+
     # 检查每个别名是否已存在，不存在则添加
     local aliases_to_add=()
     local aliases_found=0
@@ -162,7 +163,7 @@ setup_docker_aliases() {
     for alias_line in "${aliases[@]}"; do
         # 提取别名名称（例如从 "alias dphp74='...'" 中提取 "dphp74"）
         local alias_name=$(echo "$alias_line" | sed -n "s/alias \([^=]*\)=.*/\1/p")
-        
+
         # 检查配置文件中是否已存在该别名
         if grep -q "^alias $alias_name=" "$config_file" 2>/dev/null; then
             aliases_found=$((aliases_found + 1))
@@ -174,18 +175,105 @@ setup_docker_aliases() {
     # 如果有需要添加的别名
     if [[ ${#aliases_to_add[@]} -gt 0 ]]; then
         info "添加 ${#aliases_to_add[@]} 个新别名到 $config_file"
-        
-        # 添加注释和别名
-        {
-            echo ""
-            echo "# Docker容器快捷别名 - 由 $script_name.sh 脚本自动添加 $(date)"
-            for alias_line in "${aliases_to_add[@]}"; do
-                echo "$alias_line"
-            done
-        } >> "$config_file"
-        
+
+        # 准备要插入的内容
+        local content_to_insert=""
+        content_to_insert+=$'\n'
+        content_to_insert+="# Docker容器快捷别名 - 由 $script_name.sh 脚本自动添加 $(date)"$'\n'
+        for alias_line in "${aliases_to_add[@]}"; do
+            content_to_insert+="$alias_line"$'\n'
+        done
+
+        # 创建临时文件
+        local temp_file="${config_file}.tmp.$$"
+
+        # 决定插入位置的策略：
+        # 1. 如果存在 alias 行，在最后一个 alias 行之后插入
+        # 2. 如果不存在 alias 但存在 export 行，在第一个 export 行之前插入
+        # 3. 如果都不存在，在文件末尾追加
+
+        local last_alias_line=0
+        local first_export_line=0
+        local line_num=0
+
+        # 分析文件找到插入位置
+        while IFS= read -r line; do
+            line_num=$((line_num + 1))
+            # 查找 alias 行（忽略注释）
+            if [[ "$line" =~ ^[[:space:]]*alias[[:space:]] ]]; then
+                last_alias_line=$line_num
+            fi
+            # 查找第一个 export 行（忽略注释）
+            if [[ "$line" =~ ^[[:space:]]*export[[:space:]] ]] && [[ $first_export_line -eq 0 ]]; then
+                first_export_line=$line_num
+            fi
+        done < "$config_file"
+
+        # 确定插入策略
+        local insert_mode=""
+        local insert_line=0
+
+        if [[ $last_alias_line -gt 0 ]]; then
+            # 策略1: 在最后一个 alias 之后插入
+            insert_mode="after_alias"
+            insert_line=$last_alias_line
+            if [[ "$script_name" == "build" ]]; then
+                info "检测到现有 alias 配置，将在第 $insert_line 行之后插入"
+            fi
+        elif [[ $first_export_line -gt 0 ]]; then
+            # 策略2: 在第一个 export 之前插入
+            insert_mode="before_export"
+            insert_line=$first_export_line
+            if [[ "$script_name" == "build" ]]; then
+                info "检测到 export 配置，将在第 $insert_line 行之前插入"
+            fi
+        else
+            # 策略3: 在文件末尾追加
+            insert_mode="append"
+            if [[ "$script_name" == "build" ]]; then
+                info "将在文件末尾追加别名配置"
+            fi
+        fi
+
+        # 根据策略插入内容
+        if [[ "$insert_mode" == "append" ]]; then
+            # 直接追加到文件末尾
+            echo "$content_to_insert" >> "$config_file"
+        else
+            # 需要在特定位置插入
+            line_num=0
+            local inserted=false
+
+            while IFS= read -r line || [[ -n "$line" ]]; do
+                line_num=$((line_num + 1))
+
+                if [[ "$insert_mode" == "after_alias" ]] && [[ $line_num -eq $insert_line ]] && [[ "$inserted" == false ]]; then
+                    # 在最后一个 alias 之后插入
+                    echo "$line" >> "$temp_file"
+                    echo "$content_to_insert" >> "$temp_file"
+                    inserted=true
+                elif [[ "$insert_mode" == "before_export" ]] && [[ $line_num -eq $insert_line ]] && [[ "$inserted" == false ]]; then
+                    # 在第一个 export 之前插入
+                    echo "$content_to_insert" >> "$temp_file"
+                    echo "$line" >> "$temp_file"
+                    inserted=true
+                else
+                    echo "$line" >> "$temp_file"
+                fi
+            done < "$config_file"
+
+            # 替换原文件
+            if [[ -f "$temp_file" ]]; then
+                mv "$temp_file" "$config_file" || {
+                    error "无法更新配置文件: $config_file"
+                    rm -f "$temp_file"
+                    return 1
+                }
+            fi
+        fi
+
         success "成功添加 ${#aliases_to_add[@]} 个Docker别名"
-        
+
         # 尝试重新加载配置文件（仅在build脚本中）
         if [[ "$script_name" == "build" ]]; then
             if [[ "$current_shell" == "bash" ]]; then
@@ -206,7 +294,7 @@ setup_docker_aliases() {
             info "别名已添加到 $config_file"
             info "请在新的终端会话中使用这些别名，或手动执行: source $config_file"
         fi
-        
+
         # 显示使用提示
         echo ""
         echo -e "${CYAN}=== Docker容器快捷命令 ===${NC}"
@@ -216,7 +304,7 @@ setup_docker_aliases() {
             echo -e "  ${GREEN}$alias_name${NC} - 进入对应容器"
         done
         echo ""
-        
+
     else
         success "所有Docker别名已存在 (共 $aliases_found 个)"
     fi
@@ -251,27 +339,27 @@ setup_conf_permissions() {
     else
         warn "配置目录 ./conf 不存在"
     fi
-    
+
     # 设置日志目录权限（ELK服务需要）
     info "设置日志目录权限..."
     local logs_dir="./logs"
-    
+
     # 创建日志目录（如果不存在）
     if [ ! -d "$logs_dir" ]; then
         mkdir -p "$logs_dir" 2>/dev/null || true
     fi
-    
+
     # 设置日志目录权限为777，确保容器内用户可以写入
     if [ -d "$logs_dir" ]; then
         # 创建ELK相关的日志子目录
         mkdir -p "$logs_dir/elasticsearch" 2>/dev/null || true
         mkdir -p "$logs_dir/kibana" 2>/dev/null || true
         mkdir -p "$logs_dir/logstash" 2>/dev/null || true
-        
+
         # 设置所有日志目录权限为777（容器内用户UID 1000需要写入权限）
         find "$logs_dir" -type d -exec chmod 777 {} \; 2>/dev/null || true
         find "$logs_dir" -type f -exec chmod 666 {} \; 2>/dev/null || true
-        
+
         info "日志目录权限设置完成"
     else
         warn "日志目录 $logs_dir 无法创建"
@@ -281,16 +369,16 @@ setup_conf_permissions() {
 # 清理日志文件函数
 cleanup_logs() {
     info "清理日志文件..."
-    
+
     local logs_dir="$PROJECT_DIR/logs"
-    
+
     if [ -d "$logs_dir" ]; then
         # 查找并删除所有 .log 文件，但保留目录
         find "$logs_dir" -name "*.log" -type f -delete 2>/dev/null || true
-        
+
         # 统计清理的文件数量
         local cleaned_count=$(find "$logs_dir" -name "*.log" -type f 2>/dev/null | wc -l)
-        
+
         if [ "$cleaned_count" -eq 0 ]; then
             success "日志文件清理完成，共清理 $cleaned_count 个文件"
         else
@@ -315,13 +403,13 @@ load_config_files() {
         ".env"                        # 主配置文件（向后兼容）
         ".env.local"                  # 本地配置（优先级最高）
     )
-    
+
     log "开始加载分层配置文件..."
-    
+
     # 检查config目录是否存在
     if [[ ! -d "$config_dir" ]]; then
         warn "config/env目录不存在，回退到.env文件模式"
-        
+
         if [[ ! -f ".env" ]]; then
             if [[ -f ".env.example" ]]; then
                 warn ".env文件不存在，从.env.example复制..."
@@ -332,24 +420,24 @@ load_config_files() {
         fi
         config_files=(".env" ".env.local")
     fi
-    
+
     # 按优先级顺序加载配置文件
     for config_file in "${config_files[@]}"; do
         if [[ -f "$config_file" ]]; then
             # info "加载配置文件: $config_file"
-            
+
             set +u
             while IFS='=' read -r key value; do
                 # 跳过注释和空行
                 [[ "$key" =~ ^[[:space:]]*# ]] && continue
                 [[ -z "$key" ]] && continue
-                
+
                 # 确保 key 是有效的变量名
                 [[ ! "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] && continue
 
                 # 去掉值中的注释部分
                 value=$(echo "$value" | sed 's/[[:space:]]*#.*$//')
-                
+
                 # 去掉值前后的空格
                 value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
@@ -363,7 +451,7 @@ load_config_files() {
         #     info "配置文件不存在，跳过: $config_file"
         fi
     done
-    
+
     success "分层配置文件加载完成"
 }
 

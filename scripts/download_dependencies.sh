@@ -144,7 +144,8 @@ download_php_dependencies() {
     # ImageMagick
     if [[ -n "${IMAGICK_VERSION:-}" ]]; then
         download_file \
-            "https://github.com/ImageMagick/ImageMagick/archive/${IMAGICK_VERSION}.tar.gz" \
+            "https://imagemagick.org/archive/ImageMagick-${IMAGICK_VERSION}.tar.gz" \
+            # "https://github.com/ImageMagick/ImageMagick/archive/${IMAGICK_VERSION}.tar.gz" \
             "$php_src_dir/ImageMagick-${IMAGICK_VERSION}.tar.gz" \
             "ImageMagick ${IMAGICK_VERSION}"
     fi

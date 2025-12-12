@@ -9,393 +9,417 @@
 # 5. 云原生存储配置
 
 services:
-  nginx:
-    extends:
-      file: compose_web.yaml
-      service: nginx-server
-    deploy:
-      # 生产环境副本配置（高可用要求）
-      # 建议值范围：3-5（根据集群规模调整）
-      replicas: ${NGINX_PROD_REPLICAS:-3}
-      update_config:
-        parallelism: 1
-        delay: 10s
-        order: start-first
-      resources:
-        # 生产资源配额（根据实际负载调整）
-        limits:
-          cpus: ${NGINX_PROD_LIMITS_CPU:-1}       # 最大CPU核心数
-          memory: ${NGINX_PROD_LIMITS_MEMORY:-512M} # 最大内存限制
-        reservations:
-          cpus: ${NGINX_PROD_RESERVATIONS_CPU:-0.5} # 预留CPU核心数
-          memory: ${NGINX_PROD_RESERVATIONS_MEMORY:-256M} # 预留内存
-    logging:
-      driver: "json-file" # 生产环境建议使用 gelf, fluentd 等
-      options:
-        # 生产日志配置（WARN级别）
-        max-size: "100m"  # 建议值：100-500MB
-        max-file: "5"      # 建议值：5-10个文件
-        # tag: "{{.ImageName}}/{{.Name}}/{{.ID}}"
-        
-  tengine:
-    extends:
-      file: compose_web.yaml
-      service: tengine-server
-    deploy:
-      replicas: ${TENGINE_PROD_REPLICAS:-3}
-      update_config:
-        parallelism: 1
-        delay: 10s
-        order: start-first
-      resources:
-        limits:
-          cpus: ${TENGINE_PROD_LIMITS_CPU:-1}
-          memory: ${TENGINE_PROD_LIMITS_MEMORY:-512M}
-        reservations:
-          cpus: ${TENGINE_PROD_RESERVATIONS_CPU:-0.5}
-          memory: ${TENGINE_PROD_RESERVATIONS_MEMORY:-256M}
-    logging:
-      driver: "json-file"
-      options:
-        # 生产日志配置（WARN级别）
-        max-size: "100m"  # 建议值：100-500MB
-        max-file: "5"      # 建议值：5-10个文件
+    nginx:
+        extends:
+            file: compose_web.yaml
+            service: nginx-server
+        deploy:
+            # 生产环境副本配置（高可用要求）
+            # 建议值范围：3-5（根据集群规模调整）
+            replicas: ${NGINX_PROD_REPLICAS:-3}
+            update_config:
+                parallelism: 1
+                delay: 10s
+                order: start-first
+            resources:
+                # 生产资源配额（根据实际负载调整）
+                limits:
+                    cpus: ${NGINX_PROD_LIMITS_CPU:-1} # 最大CPU核心数
+                    memory: ${NGINX_PROD_LIMITS_MEMORY:-512M} # 最大内存限制
+                reservations:
+                    cpus: ${NGINX_PROD_RESERVATIONS_CPU:-0.5} # 预留CPU核心数
+                    memory: ${NGINX_PROD_RESERVATIONS_MEMORY:-256M} # 预留内存
+        logging:
+            driver: "json-file" # 生产环境建议使用 gelf, fluentd 等
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "100m" # 建议值：100-500MB
+                max-file: "5" # 建议值：5-10个文件
+                # tag: "{{.ImageName}}/{{.Name}}/{{.ID}}"
 
-  valkey:
-    extends:
-      file: compose_databases.yaml
-      service: valkey-server
-    deploy:
-      replicas: ${VALKEY_PROD_REPLICAS:-2} # 通常缓存服务可以少于应用服务副本
-      update_config:
-        parallelism: 1
-        delay: 10s
-        order: start-first
-      resources:
-        limits:
-          cpus: ${VALKEY_PROD_LIMITS_CPU:-0.5}
-          memory: ${VALKEY_PROD_LIMITS_MEMORY:-512M}
-        reservations:
-          cpus: ${VALKEY_PROD_RESERVATIONS_CPU:-0.25}
-          memory: ${VALKEY_PROD_RESERVATIONS_MEMORY:-256M}
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "3"
+    tengine:
+        extends:
+            file: compose_web.yaml
+            service: tengine-server
+        deploy:
+            replicas: ${TENGINE_PROD_REPLICAS:-3}
+            update_config:
+                parallelism: 1
+                delay: 10s
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${TENGINE_PROD_LIMITS_CPU:-1}
+                    memory: ${TENGINE_PROD_LIMITS_MEMORY:-512M}
+                reservations:
+                    cpus: ${TENGINE_PROD_RESERVATIONS_CPU:-0.5}
+                    memory: ${TENGINE_PROD_RESERVATIONS_MEMORY:-256M}
+        logging:
+            driver: "json-file"
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "100m" # 建议值：100-500MB
+                max-file: "5" # 建议值：5-10个文件
 
-  redis:
-    extends:
-      file: compose_databases.yaml
-      service: redis-server
-    deploy:
-      replicas: ${REDIS_PROD_REPLICAS:-2}
-      update_config:
-        parallelism: 1
-        delay: 10s
-        order: start-first
-      resources:
-        limits:
-          cpus: ${REDIS_PROD_LIMITS_CPU:-0.5}
-          memory: ${REDIS_PROD_LIMITS_MEMORY:-512M}
-        reservations:
-          cpus: ${REDIS_PROD_RESERVATIONS_CPU:-0.25}
-          memory: ${REDIS_PROD_RESERVATIONS_MEMORY:-256M}
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "3"
+    valkey:
+        extends:
+            file: compose_databases.yaml
+            service: valkey-server
+        deploy:
+            replicas: ${VALKEY_PROD_REPLICAS:-2} # 通常缓存服务可以少于应用服务副本
+            update_config:
+                parallelism: 1
+                delay: 10s
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${VALKEY_PROD_LIMITS_CPU:-0.5}
+                    memory: ${VALKEY_PROD_LIMITS_MEMORY:-512M}
+                reservations:
+                    cpus: ${VALKEY_PROD_RESERVATIONS_CPU:-0.25}
+                    memory: ${VALKEY_PROD_RESERVATIONS_MEMORY:-256M}
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "50m"
+                max-file: "3"
 
-  mongo:
-    extends:
-      file: compose_databases.yaml
-      service: mongo-server
-    deploy:
-      replicas: ${MONGO_PROD_REPLICAS:-1} # MongoDB副本集通常通过其自身机制管理，Compose中常为1
-      update_config:
-        parallelism: 1
-        delay: 30s # 数据库更新应更谨慎
-        order: start-first
-      resources:
-        limits:
-          cpus: ${MONGO_PROD_LIMITS_CPU:-1}
-          memory: ${MONGO_PROD_LIMITS_MEMORY:-2G}
-        reservations:
-          cpus: ${MONGO_PROD_RESERVATIONS_CPU:-0.5}
-          memory: ${MONGO_PROD_RESERVATIONS_MEMORY:-1G}
-    logging:
-      driver: "json-file"
-      options:
-        # 生产日志配置（WARN级别）
-        max-size: "100m"  # 建议值：100-500MB
-        max-file: "5"      # 建议值：5-10个文件
+    redis:
+        extends:
+            file: compose_databases.yaml
+            service: redis-server
+        deploy:
+            replicas: ${REDIS_PROD_REPLICAS:-2}
+            update_config:
+                parallelism: 1
+                delay: 10s
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${REDIS_PROD_LIMITS_CPU:-0.5}
+                    memory: ${REDIS_PROD_LIMITS_MEMORY:-512M}
+                reservations:
+                    cpus: ${REDIS_PROD_RESERVATIONS_CPU:-0.25}
+                    memory: ${REDIS_PROD_RESERVATIONS_MEMORY:-256M}
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "50m"
+                max-file: "3"
 
-  mysql:
-    extends:
-      file: compose_databases.yaml
-      service: mysql-server
-    deploy:
-      replicas: ${MYSQL_PROD_REPLICAS:-1} # MySQL主从/集群通常有其自身管理方式
-      update_config:
-        parallelism: 1
-        delay: 30s
-        order: start-first
-      resources:
-        limits:
-          cpus: ${MYSQL_PROD_LIMITS_CPU:-1}
-          memory: ${MYSQL_PROD_LIMITS_MEMORY:-2G}
-        reservations:
-          cpus: ${MYSQL_PROD_RESERVATIONS_CPU:-0.5}
-          memory: ${MYSQL_PROD_RESERVATIONS_MEMORY:-1G}
-    logging:
-      driver: "json-file"
-      options:
-        # 生产日志配置（WARN级别）
-        max-size: "100m"  # 建议值：100-500MB
-        max-file: "5"      # 建议值：5-10个文件
-  mysql-backup:
-    extends:
-      file: compose_databases.yaml
-      service: mysql-backup
-    deploy:
-      replicas: ${MYSQL_BACKUP_PROD_REPLICAS:-1} # 备份服务通常单副本即可
-      update_config:
-        parallelism: 1
-        delay: 30s # 备份服务更新应更谨慎
-        order: start-first
-      resources:
-        limits:
-          cpus: ${MYSQL_BACKUP_PROD_LIMITS_CPU:-0.5}
-          memory: ${MYSQL_BACKUP_PROD_LIMITS_MEMORY:-512M}
-        reservations:
-          cpus: ${MYSQL_BACKUP_PROD_RESERVATIONS_CPU:-0.1}
-          memory: ${MYSQL_BACKUP_PROD_RESERVATIONS_MEMORY:-128M}
-    logging:
-      driver: "json-file"
-      options:
-        # 生产日志配置（WARN级别）
-        max-size: "50m"   # 建议值：50-100MB
-        max-file: "5"     # 建议值：5-10个文件
+    mongo:
+        extends:
+            file: compose_databases.yaml
+            service: mongo-server
+        deploy:
+            replicas: ${MONGO_PROD_REPLICAS:-1} # MongoDB副本集通常通过其自身机制管理，Compose中常为1
+            update_config:
+                parallelism: 1
+                delay: 30s # 数据库更新应更谨慎
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${MONGO_PROD_LIMITS_CPU:-1}
+                    memory: ${MONGO_PROD_LIMITS_MEMORY:-2G}
+                reservations:
+                    cpus: ${MONGO_PROD_RESERVATIONS_CPU:-0.5}
+                    memory: ${MONGO_PROD_RESERVATIONS_MEMORY:-1G}
+        logging:
+            driver: "json-file"
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "100m" # 建议值：100-500MB
+                max-file: "5" # 建议值：5-10个文件
 
-  postgres:
-    extends:
-      file: compose_databases.yaml
-      service: postgres-server
-    deploy:
-      replicas: ${POSTGRES_PROD_REPLICAS:-1}
-      update_config:
-        parallelism: 1
-        delay: 30s
-        order: start-first
-      resources:
-        limits:
-          cpus: ${POSTGRES_PROD_LIMITS_CPU:-1}
-          memory: ${POSTGRES_PROD_LIMITS_MEMORY:-2G}
-        reservations:
-          cpus: ${POSTGRES_PROD_RESERVATIONS_CPU:-0.5}
-          memory: ${POSTGRES_PROD_RESERVATIONS_MEMORY:-1G}
-    logging:
-      driver: "json-file"
-      options:
-        # 生产日志配置（WARN级别）
-        max-size: "100m"  # 建议值：100-500MB
-        max-file: "5"      # 建议值：5-10个文件
+    mysql:
+        extends:
+            file: compose_databases.yaml
+            service: mysql-server
+        deploy:
+            replicas: ${MYSQL_PROD_REPLICAS:-1} # MySQL主从/集群通常有其自身管理方式
+            update_config:
+                parallelism: 1
+                delay: 30s
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${MYSQL_PROD_LIMITS_CPU:-1}
+                    memory: ${MYSQL_PROD_LIMITS_MEMORY:-2G}
+                reservations:
+                    cpus: ${MYSQL_PROD_RESERVATIONS_CPU:-0.5}
+                    memory: ${MYSQL_PROD_RESERVATIONS_MEMORY:-1G}
+        logging:
+            driver: "json-file"
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "100m" # 建议值：100-500MB
+                max-file: "5" # 建议值：5-10个文件
+    mysql-backup:
+        extends:
+            file: compose_databases.yaml
+            service: mysql-backup
+        deploy:
+            replicas: ${MYSQL_BACKUP_PROD_REPLICAS:-1} # 备份服务通常单副本即可
+            update_config:
+                parallelism: 1
+                delay: 30s # 备份服务更新应更谨慎
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${MYSQL_BACKUP_PROD_LIMITS_CPU:-0.5}
+                    memory: ${MYSQL_BACKUP_PROD_LIMITS_MEMORY:-512M}
+                reservations:
+                    cpus: ${MYSQL_BACKUP_PROD_RESERVATIONS_CPU:-0.1}
+                    memory: ${MYSQL_BACKUP_PROD_RESERVATIONS_MEMORY:-128M}
+        logging:
+            driver: "json-file"
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "50m" # 建议值：50-100MB
+                max-file: "5" # 建议值：5-10个文件
 
-  pgadmin:
-    extends:
-      file: compose_databases.yaml
-      service: pgadmin-server
-    deploy:
-      replicas: 1 # pgAdmin通常单副本即可
-      resources:
-        limits:
-          cpus: ${PGADMIN_PROD_LIMITS_CPU:-0.5}
-          memory: ${PGADMIN_PROD_LIMITS_MEMORY:-256M}
-        reservations:
-          cpus: ${PGADMIN_PROD_RESERVATIONS_CPU:-0.1}
-          memory: ${PGADMIN_PROD_RESERVATIONS_MEMORY:-128M}
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "20m"
-        max-file: "3"
+    postgres:
+        extends:
+            file: compose_databases.yaml
+            service: postgres-server
+        deploy:
+            replicas: ${POSTGRES_PROD_REPLICAS:-1}
+            update_config:
+                parallelism: 1
+                delay: 30s
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${POSTGRES_PROD_LIMITS_CPU:-1}
+                    memory: ${POSTGRES_PROD_LIMITS_MEMORY:-2G}
+                reservations:
+                    cpus: ${POSTGRES_PROD_RESERVATIONS_CPU:-0.5}
+                    memory: ${POSTGRES_PROD_RESERVATIONS_MEMORY:-1G}
+        logging:
+            driver: "json-file"
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "100m" # 建议值：100-500MB
+                max-file: "5" # 建议值：5-10个文件
 
-  php84_apache:
-    extends:
-      file: compose_php.yaml
-      service: php84_apache
-    deploy:
-      replicas: ${PHP_PROD_REPLICAS:-3}
-      update_config:
-        parallelism: 1
-        delay: 10s
-        order: start-first
-      resources:
-        limits:
-          cpus: ${PHP_PROD_LIMITS_CPU:-1}
-          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
-        reservations:
-          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
-          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
-    logging:
-      driver: "json-file"
-      options:
-        # 生产日志配置（WARN级别）
-        max-size: "100m"  # 建议值：100-500MB
-        max-file: "5"      # 建议值：5-10个文件
+    pgadmin:
+        extends:
+            file: compose_databases.yaml
+            service: pgadmin-server
+        deploy:
+            replicas: 1 # pgAdmin通常单副本即可
+            resources:
+                limits:
+                    cpus: ${PGADMIN_PROD_LIMITS_CPU:-0.5}
+                    memory: ${PGADMIN_PROD_LIMITS_MEMORY:-256M}
+                reservations:
+                    cpus: ${PGADMIN_PROD_RESERVATIONS_CPU:-0.1}
+                    memory: ${PGADMIN_PROD_RESERVATIONS_MEMORY:-128M}
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "20m"
+                max-file: "3"
 
-  php83_apache:
-    extends:
-      file: compose_php.yaml
-      service: php83_apache
-    deploy:
-      replicas: ${PHP_PROD_REPLICAS:-3}
-      update_config:
-        parallelism: 1
-        delay: 10s
-        order: start-first
-      resources:
-        limits:
-          cpus: ${PHP_PROD_LIMITS_CPU:-1}
-          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
-        reservations:
-          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
-          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
-    logging:
-      driver: "json-file"
-      options:
-        # 生产日志配置（WARN级别）
-        max-size: "100m"  # 建议值：100-500MB
-        max-file: "5"      # 建议值：5-10个文件
+    php85_apache:
+        extends:
+            file: compose_php.yaml
+            service: php85_apache
+        deploy:
+            replicas: ${PHP_PROD_REPLICAS:-3}
+            update_config:
+                parallelism: 1
+                delay: 10s
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${PHP_PROD_LIMITS_CPU:-1}
+                    memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+                reservations:
+                    cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+                    memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+        logging:
+            driver: "json-file"
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "100m" # 建议值：100-500MB
+                max-file: "5" # 建议值：5-10个文件
 
-  php82_apache:
-    extends:
-      file: compose_php.yaml
-      service: php82_apache
-    deploy:
-      replicas: ${PHP_PROD_REPLICAS:-3}
-      update_config:
-        parallelism: 1
-        delay: 10s
-        order: start-first
-      resources:
-        limits:
-          cpus: ${PHP_PROD_LIMITS_CPU:-1}
-          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
-        reservations:
-          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
-          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
-    logging:
-      driver: "json-file"
-      options:
-        # 生产日志配置（WARN级别）
-        max-size: "100m"  # 建议值：100-500MB
-        max-file: "5"      # 建议值：5-10个文件
+    php84_apache:
+        extends:
+            file: compose_php.yaml
+            service: php84_apache
+        deploy:
+            replicas: ${PHP_PROD_REPLICAS:-3}
+            update_config:
+                parallelism: 1
+                delay: 10s
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${PHP_PROD_LIMITS_CPU:-1}
+                    memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+                reservations:
+                    cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+                    memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+        logging:
+            driver: "json-file"
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "100m" # 建议值：100-500MB
+                max-file: "5" # 建议值：5-10个文件
 
-  php81_apache:
-    extends:
-      file: compose_php.yaml
-      service: php81_apache
-    deploy:
-      replicas: ${PHP_PROD_REPLICAS:-3}
-      update_config:
-        parallelism: 1
-        delay: 10s
-        order: start-first
-      resources:
-        limits:
-          cpus: ${PHP_PROD_LIMITS_CPU:-1}
-          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
-        reservations:
-          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
-          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
-    logging:
-      driver: "json-file"
-      options:
-        # 生产日志配置（WARN级别）
-        max-size: "100m"  # 建议值：100-500MB
-        max-file: "5"      # 建议值：5-10个文件
+    php83_apache:
+        extends:
+            file: compose_php.yaml
+            service: php83_apache
+        deploy:
+            replicas: ${PHP_PROD_REPLICAS:-3}
+            update_config:
+                parallelism: 1
+                delay: 10s
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${PHP_PROD_LIMITS_CPU:-1}
+                    memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+                reservations:
+                    cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+                    memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+        logging:
+            driver: "json-file"
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "100m" # 建议值：100-500MB
+                max-file: "5" # 建议值：5-10个文件
 
-  php80_apache:
-    extends:
-      file: compose_php.yaml
-      service: php80_apache
-    deploy:
-      replicas: ${PHP_PROD_REPLICAS:-3}
-      update_config:
-        parallelism: 1
-        delay: 10s
-        order: start-first
-      resources:
-        limits:
-          cpus: ${PHP_PROD_LIMITS_CPU:-1}
-          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
-        reservations:
-          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
-          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
-    logging:
-      driver: "json-file"
-      options:
-        # 生产日志配置（WARN级别）
-        max-size: "100m"  # 建议值：100-500MB
-        max-file: "5"      # 建议值：5-10个文件
+    php82_apache:
+        extends:
+            file: compose_php.yaml
+            service: php82_apache
+        deploy:
+            replicas: ${PHP_PROD_REPLICAS:-3}
+            update_config:
+                parallelism: 1
+                delay: 10s
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${PHP_PROD_LIMITS_CPU:-1}
+                    memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+                reservations:
+                    cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+                    memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+        logging:
+            driver: "json-file"
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "100m" # 建议值：100-500MB
+                max-file: "5" # 建议值：5-10个文件
 
-  php74_apache:
-    extends:
-      file: compose_php.yaml
-      service: php74_apache
-    deploy:
-      replicas: ${PHP_PROD_REPLICAS:-3}
-      update_config:
-        parallelism: 1
-        delay: 10s
-        order: start-first
-      resources:
-        limits:
-          cpus: ${PHP_PROD_LIMITS_CPU:-1}
-          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
-        reservations:
-          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
-          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
-    logging:
-      driver: "json-file"
-      options:
-        # 生产日志配置（WARN级别）
-        max-size: "100m"  # 建议值：100-500MB
-        max-file: "5"      # 建议值：5-10个文件
+    php81_apache:
+        extends:
+            file: compose_php.yaml
+            service: php81_apache
+        deploy:
+            replicas: ${PHP_PROD_REPLICAS:-3}
+            update_config:
+                parallelism: 1
+                delay: 10s
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${PHP_PROD_LIMITS_CPU:-1}
+                    memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+                reservations:
+                    cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+                    memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+        logging:
+            driver: "json-file"
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "100m" # 建议值：100-500MB
+                max-file: "5" # 建议值：5-10个文件
 
-  php72_apache:
-    extends:
-      file: compose_php.yaml
-      service: php72_apache
-    deploy:
-      replicas: ${PHP_PROD_REPLICAS:-3}
-      update_config:
-        parallelism: 1
-        delay: 10s
-        order: start-first
-      resources:
-        limits:
-          cpus: ${PHP_PROD_LIMITS_CPU:-1}
-          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
-        reservations:
-          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
-          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
-    logging:
-      driver: "json-file"
-      options:
-        # 生产日志配置（WARN级别）
-        max-size: "100m"  # 建议值：100-500MB
-        max-file: "5"      # 建议值：5-10个文件
+    php80_apache:
+        extends:
+            file: compose_php.yaml
+            service: php80_apache
+        deploy:
+            replicas: ${PHP_PROD_REPLICAS:-3}
+            update_config:
+                parallelism: 1
+                delay: 10s
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${PHP_PROD_LIMITS_CPU:-1}
+                    memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+                reservations:
+                    cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+                    memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+        logging:
+            driver: "json-file"
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "100m" # 建议值：100-500MB
+                max-file: "5" # 建议值：5-10个文件
+
+    php74_apache:
+        extends:
+            file: compose_php.yaml
+            service: php74_apache
+        deploy:
+            replicas: ${PHP_PROD_REPLICAS:-3}
+            update_config:
+                parallelism: 1
+                delay: 10s
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${PHP_PROD_LIMITS_CPU:-1}
+                    memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+                reservations:
+                    cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+                    memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+        logging:
+            driver: "json-file"
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "100m" # 建议值：100-500MB
+                max-file: "5" # 建议值：5-10个文件
+
+    php72_apache:
+        extends:
+            file: compose_php.yaml
+            service: php72_apache
+        deploy:
+            replicas: ${PHP_PROD_REPLICAS:-3}
+            update_config:
+                parallelism: 1
+                delay: 10s
+                order: start-first
+            resources:
+                limits:
+                    cpus: ${PHP_PROD_LIMITS_CPU:-1}
+                    memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+                reservations:
+                    cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+                    memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+        logging:
+            driver: "json-file"
+            options:
+                # 生产日志配置（WARN级别）
+                max-size: "100m" # 建议值：100-500MB
+                max-file: "5" # 建议值：5-10个文件
 
 # 可以根据需要为其他服务添加生产环境特定的覆盖配置
 # 例如，数据库服务在生产环境可能使用特定的云存储卷或不同的备份策略
 
 volumes:
-  mysql_data:
-    driver: local
-  pgadmin:
-    driver: local
-  php_sessions:
-    driver: local
+    mysql_data:
+        driver: local
+    pgadmin:
+        driver: local
+    php_sessions:
+        driver: local

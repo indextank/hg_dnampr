@@ -1,3 +1,10 @@
+x-healthcheck:
+  &default-healthcheck
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
 x-common-variables:
   &default-common
   restart: unless-stopped  # 更稳定的重启策略
@@ -85,11 +92,8 @@ services:
         reservations:
           memory: ${REDIS_RESERVATIONS_MEMORY:-256M}
     healthcheck:
+      <<: *default-healthcheck
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
     networks:
       - default
     # sysctls:

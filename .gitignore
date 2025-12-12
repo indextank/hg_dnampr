@@ -221,3 +221,4 @@ NOTES.md
 experimental/
 playground/
 sandbox/
+.kilocode/*.json

@@ -19,45 +19,51 @@
 ## 📋 支持的服务
 
 ### Web服务器
-| 服务 | 版本 | 说明 |
-|------|------|------|
-| `nginx` | 1.25+ | 标准Nginx服务器 |
-| `tengine` | 3.0+ | 阿里巴巴增强版Nginx |
+
+| 服务      | 版本  | 说明                |
+| --------- | ----- | ------------------- |
+| `nginx`   | 1.25+ | 标准Nginx服务器     |
+| `tengine` | 3.0+  | 阿里巴巴增强版Nginx |
 
 ### PHP版本
-| 版本 | 服务名 | 端口 | 说明 |
-|------|--------|------|------|
+
+| 版本    | 服务名  | 端口 | 说明               |
+| ------- | ------- | ---- | ------------------ |
 | PHP 8.4 | `php84` | 8084 | 最新版本，推荐使用 |
-| PHP 8.3 | `php83` | 8083 | 稳定版本 |
-| PHP 8.2 | `php82` | 8082 | 稳定版本 |
-| PHP 8.1 | `php81` | 8081 | 稳定版本 |
-| PHP 8.0 | `php80` | 8080 | 稳定版本 |
-| PHP 7.4 | `php74` | 8074 | 兼容版本 |
-| PHP 7.2 | `php72` | 8072 | 兼容版本 |
+| PHP 8.3 | `php83` | 8083 | 稳定版本           |
+| PHP 8.2 | `php82` | 8082 | 稳定版本           |
+| PHP 8.1 | `php81` | 8081 | 稳定版本           |
+| PHP 8.0 | `php80` | 8080 | 稳定版本           |
+| PHP 7.4 | `php74` | 8074 | 兼容版本           |
+| PHP 7.2 | `php72` | 8072 | 兼容版本           |
 
 ### 数据库服务
-| 服务 | 版本 | 端口 | 说明 |
-|------|------|------|------|
-| `mysql` | 8.0+ | 3306 | MySQL 8.0（基于docker安装） |
-| `mongo` | 7.0+ | 27017 | MongoDB |
-| `postgres` | 16+ | 5432 | PostgreSQL |
+
+| 服务       | 版本 | 端口  | 说明                        |
+| ---------- | ---- | ----- | --------------------------- |
+| `mysql`    | 8.0+ | 3306  | MySQL 8.0（基于docker安装） |
+| `mongo`    | 7.0+ | 27017 | MongoDB                     |
+| `postgres` | 16+  | 5432  | PostgreSQL                  |
 
 ### 缓存服务
-| 服务 | 版本 | 端口 | 说明 |
-|------|------|------|------|
-| `redis` | 7.0+ | 6379 | Redis缓存 |
+
+| 服务     | 版本 | 端口 | 说明          |
+| -------- | ---- | ---- | ------------- |
+| `redis`  | 7.0+ | 6379 | Redis缓存     |
 | `valkey` | 7.0+ | 6380 | Redis兼容缓存 |
 
 ### 特殊组合
-| 组合 | 服务 | 说明 |
-|------|------|------|
+
+| 组合  | 服务                              | 说明       |
+| ----- | --------------------------------- | ---------- |
 | `elk` | Elasticsearch + Kibana + Logstash | 日志分析栈 |
-| `sgr` | Spug + Gitea + Rap2 | 开发工具栈 |
-| `all` | 所有基础服务 | 完整环境 |
+| `sgr` | Spug + Gitea + Rap2               | 开发工具栈 |
+| `all` | 所有基础服务                      | 完整环境   |
 
 ## 🏗️ 架构设计
 
 ### 分层配置架构
+
 ```
 config/env/
 ├── base.env          # 基础配置（代理、时区、路径）
@@ -70,6 +76,7 @@ config/env/
 ```
 
 ### 服务编排架构
+
 ```
 Docker Compose Files:
 ├── docker-compose.yaml           # 基础服务编排
@@ -87,6 +94,7 @@ Docker Compose Files:
 ### 环境变量配置
 
 #### 基础配置 (`base.env`)
+
 ```bash
 # 环境标识
 ENVIRONMENT=development                    # development/production
@@ -107,6 +115,7 @@ MYSQL_DATA_DIR=/data/myDockerData/mysql_data
 ```
 
 #### PHP配置 (`php.env`)
+
 ```bash
 # PHP版本配置
 PHP84_VERSION=8.4.0                       # PHP 8.4版本
@@ -130,6 +139,7 @@ PHP_UPLOAD_MAX_FILESIZE=128M              # 最大上传文件大小
 ```
 
 #### 数据库配置 (`database.env`)
+
 ```bash
 # MySQL配置
 MYSQL_ROOT_PASSWORD=root123               # MySQL root密码
@@ -150,16 +160,19 @@ POSTGRES_PASSWORD=postgres123             # PostgreSQL密码
 ### 构建选项详解
 
 #### build.sh 选项
+
 ```bash
 ./build.sh [服务名...] [环境] [选项]
 ```
 
 **环境类型：**
+
 - `dev` (默认) - 开发环境，优化构建速度
 - `prod` - 生产环境，优化性能和安全性
 - `test` - 测试环境，用于CI/CD
 
 **构建选项：**
+
 - `--no-cache` - 不使用构建缓存，强制重新构建
 - `--parallel` - 并行构建多个服务（默认）
 - `--no-parallel` - 禁用并行构建，串行构建
@@ -170,11 +183,13 @@ POSTGRES_PASSWORD=postgres123             # PostgreSQL密码
 - `--push` - 推送到镜像仓库
 
 #### up.sh 选项
+
 ```bash
 ./up.sh [服务名...] [操作] [选项]
 ```
 
 **操作类型：**
+
 - 无参数 - 启动服务
 - `stop` - 停止服务
 - `restart` - 重启服务
@@ -185,6 +200,7 @@ POSTGRES_PASSWORD=postgres123             # PostgreSQL密码
 ## 🔧 高级配置
 
 ### 自定义虚拟主机
+
 ```bash
 # 编辑虚拟主机配置
 vim vhost/nginx_vhost/default.conf
@@ -195,7 +211,7 @@ server {
     server_name your-domain.com;
     root /var/www/html;
     index index.php index.html;
-    
+
     location ~ \.php$ {
         fastcgi_pass php84_apache:88;
         fastcgi_index index.php;
@@ -205,6 +221,7 @@ server {
 ```
 
 ### 性能优化配置
+
 ```bash
 # PHP性能优化
 PHP_MEMORY_LIMIT=2048M                    # 增加内存限制
@@ -219,6 +236,7 @@ MYSQL_QUERY_CACHE_SIZE=128M               # 查询缓存
 ```
 
 ### 安全配置
+
 ```bash
 # 容器安全
 security_opt:
@@ -235,6 +253,7 @@ networks:
 ## 📊 监控和日志
 
 ### 日志配置
+
 ```bash
 # 日志轮转配置
 LOG_MAX_SIZE=100m                         # 单个日志文件最大大小
@@ -246,6 +265,7 @@ NGINX_LOG_DIR=./logs/nginx                # Nginx日志目录
 ```
 
 ### ELK日志分析
+
 ```bash
 # 启动ELK栈
 ./build.sh elk --auto-up
@@ -258,6 +278,7 @@ vim conf/logstash/pipeline/default.conf
 ```
 
 ### 健康检查
+
 ```bash
 # 服务健康检查
 docker-compose ps                         # 查看服务状态
@@ -274,6 +295,7 @@ healthcheck:
 ## 🚀 部署指南
 
 ### 开发环境部署
+
 ```bash
 # 1. 克隆项目
 git clone <repository-url>
@@ -287,6 +309,7 @@ curl http://localhost:8084
 ```
 
 ### 生产环境部署
+
 ```bash
 # 1. 生产环境完整部署
 ./build.sh all prod --no-cache --auto-prune --auto-up
@@ -302,20 +325,21 @@ curl http://localhost:8084
 ```
 
 ### CI/CD集成
+
 ```yaml
 # .github/workflows/deploy.yml
 name: Deploy to Production
 on:
-  push:
-    branches: [main]
+    push:
+        branches: [main]
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Deploy with Docker
-        run: |
-          ./build.sh all prod --no-cache --auto-prune --auto-up
+    deploy:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v3
+            - name: Deploy with Docker
+              run: |
+                  ./build.sh all prod --no-cache --auto-prune --auto-up
 ```
 
 ## 🔍 故障排除
@@ -323,6 +347,7 @@ jobs:
 ### 常见问题
 
 #### 1. 端口冲突
+
 ```bash
 # 检查端口占用
 netstat -tulpn | grep :8084
@@ -333,6 +358,7 @@ vim config/env/php.env
 ```
 
 #### 2. 权限问题
+
 ```bash
 # 修复脚本权限
 chmod +x build.sh up.sh
@@ -342,6 +368,7 @@ find build/ -name "*entrypoint*" -type f -exec chmod +x {} \;
 ```
 
 #### 3. 磁盘空间不足
+
 ```bash
 # 清理Docker垃圾
 docker system prune -a -f --volumes
@@ -351,6 +378,7 @@ docker system prune -a -f --volumes
 ```
 
 #### 4. 网络问题
+
 ```bash
 # 检查网络连接
 docker network ls
@@ -363,6 +391,7 @@ docker-compose up -d
 ```
 
 ### 调试技巧
+
 ```bash
 # 查看详细构建日志
 ./build.sh nginx php84 2>&1 | tee build.log
@@ -377,12 +406,14 @@ docker-compose config
 ## 📚 开发指南
 
 ### 添加新服务
+
 1. 在 `build/` 目录下创建Dockerfile
 2. 在 `conf/` 目录下添加配置文件
 3. 在 `compose_*.yaml` 中添加服务定义
 4. 在 `config/env/` 中添加环境变量
 
 ### 自定义构建
+
 ```dockerfile
 # build/custom/Dockerfile
 FROM php:8.4-apache
@@ -398,6 +429,7 @@ CMD ["apache2-foreground"]
 ```
 
 ### 扩展开发
+
 ```bash
 # 创建自定义扩展
 mkdir -p build/extensions/custom
@@ -411,18 +443,21 @@ cd build/extensions/custom
 ## 🤝 贡献指南
 
 ### 提交Issue
+
 1. 使用Issue模板
 2. 提供详细的错误信息
 3. 包含系统环境信息
 4. 提供复现步骤
 
 ### 提交Pull Request
+
 1. Fork项目
 2. 创建功能分支
 3. 提交代码变更
 4. 创建Pull Request
 
 ### 代码规范
+
 - 遵循Shell脚本最佳实践
 - 使用有意义的变量名
 - 添加适当的注释

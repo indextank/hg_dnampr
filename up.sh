@@ -30,7 +30,7 @@ ${YELLOW}服务名:${NC}
     mysql                                            - MySQL数据库
     redis, valkey                                     - 缓存服务
     mongo, postgresql                                 - 其他数据库
-    elk                                              - ELK栈
+    elk                                              - ELK栈 (自动检测SSL配置并生成证书)
     sgr                                              - Spug+Gitea+Rap2栈
     all                                              - 所有服务
 
@@ -72,7 +72,8 @@ ${YELLOW}示例:${NC}
     $0 delete                                       # 强制删除所有容器
     $0 prune                                        # 清理未使用的资源（镜像、容器、网络、卷）
     $0 clean-all                                    # 彻底清理所有容器、镜像、网络和卷（危险操作）
-    $0 elk --env prod                               # 启动ELK栈生产环境
+    $0 elk --env prod                               # 启动ELK栈生产环境 (自动检测并生成SSL证书)
+    $0 elk dev                                      # 启动ELK栈开发环境 (根据配置决定是否生成证书)
 
 ${YELLOW}特殊操作:${NC}
     up          - 对所有已安装/启动的容器执行操作
@@ -88,6 +89,15 @@ ${YELLOW}特殊操作:${NC}
                   • 清理构建缓存
     purge       - 同 clean-all，彻底清理所有资源
 
+${YELLOW}ELK SSL证书自动生成:${NC}
+    当启动ELK服务时，脚本会自动检查以下内容：
+    1. 读取 config/env/elk.[ENV].env 中的 ELK_HTTP_SSL_ENABLED 配置
+    2. 如果 ELK_HTTP_SSL_ENABLED=true，则检查SSL证书是否存在
+    3. 如果证书缺失或不完整，自动运行 scripts/generate-elk-certs.sh 生成证书
+    4. 如果 ELK_HTTP_SSL_ENABLED=false，跳过证书生成
+
+    ${GREEN}优势：${NC}避免因忘记生成证书导致ELK服务启动失败
+
 ${RED}${BOLD}⚠️  警告：clean-all 和 purge 操作会删除所有容器和镜像，请谨慎使用！${NC}
 
 EOF
@@ -97,6 +107,7 @@ EOF
 map_service_name() {
     local service="$1"
     case "$service" in
+        php85) echo "php85_apache" ;;
         php84) echo "php84_apache" ;;
         php83) echo "php83_apache" ;;
         php82) echo "php82_apache" ;;
@@ -121,7 +132,7 @@ map_service_name() {
 get_compose_files() {
     local environment="$1"
     local services=("${@:2}")
-    
+
     # 检查是否包含特殊组合
     for service in "${services[@]}"; do
         case "$service" in
@@ -135,7 +146,7 @@ get_compose_files() {
                 ;;
         esac
     done
-    
+
     # 标准组合
     case "$environment" in
         dev|development)
@@ -174,7 +185,7 @@ get_special_services() {
 auto_add_mysql_backup() {
     local -n services_ref=$1
     local operation=${2:-"操作"}
-    
+
     # 检查是否包含mysql服务
     local has_mysql=false
     for service in "${services_ref[@]}"; do
@@ -183,7 +194,7 @@ auto_add_mysql_backup() {
             break
         fi
     done
-    
+
     # 如果包含MySQL服务且未包含mysql_backup，则自动添加
     if [[ "$has_mysql" == "true" ]]; then
         local has_mysql_backup=false
@@ -193,7 +204,7 @@ auto_add_mysql_backup() {
                 break
             fi
         done
-        
+
         if [[ "$has_mysql_backup" == "false" ]]; then
             # 根据检测到的MySQL版本设置正确的镜像
             local mysql_backup_image="hg_dnmpr-mysql:latest"
@@ -205,7 +216,7 @@ auto_add_mysql_backup() {
                     break
                 fi
             done
-            
+
             # 对于某些操作，需要检查mysql镜像是否存在
             if [[ "$operation" == "up" || "$operation" == "start" || "$operation" == "restart" ]]; then
                 if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "$mysql_backup_image" 2>/dev/null; then
@@ -226,8 +237,8 @@ auto_add_mysql_backup() {
 check_and_generate_elk_certs() {
     local environment="$1"
     local services=("${@:2}")
-    
-    # 只在包含ELK服务且环境为prod时检查证书
+
+    # 只在包含ELK服务时检查证书
     local has_elk=false
     for service in "${services[@]}"; do
         if [[ "$service" == "elk" ]]; then
@@ -235,11 +246,11 @@ check_and_generate_elk_certs() {
             break
         fi
     done
-    
+
     if [[ "$has_elk" == "false" ]]; then
         return 0
     fi
-    
+
     # 标准化环境名称
     local env_name="$environment"
     case "$env_name" in
@@ -247,11 +258,28 @@ check_and_generate_elk_certs() {
         development|dev) env_name="dev" ;;
         *) env_name="dev" ;;
     esac
-    
-    # 注意：由于Elasticsearch 8.x即使SSL被禁用也会验证证书文件的有效性
-    # 因此开发环境和生产环境都需要生成真实的SSL证书
-    # 区别在于：开发环境不实际使用SSL（ELK_HTTP_SSL_ENABLED=false）
-    
+
+    # 读取环境配置文件中的 ELK_HTTP_SSL_ENABLED 配置
+    local elk_env_file="config/env/elk.${env_name}.env"
+    local ssl_enabled="false"
+
+    if [[ -f "$elk_env_file" ]]; then
+        # 读取配置文件中的 ELK_HTTP_SSL_ENABLED 值
+        if grep -q "^ELK_HTTP_SSL_ENABLED=true" "$elk_env_file" 2>/dev/null; then
+            ssl_enabled="true"
+        elif grep -q "^ELK_HTTP_SSL_ENABLED=false" "$elk_env_file" 2>/dev/null; then
+            ssl_enabled="false"
+        fi
+    fi
+
+    # 如果 SSL 未启用，跳过证书生成
+    if [[ "$ssl_enabled" == "false" ]]; then
+        info "ℹ️  SSL未启用 (ELK_HTTP_SSL_ENABLED=false)，跳过证书生成"
+        return 0
+    fi
+
+    info "🔐 检测到SSL已启用 (ELK_HTTP_SSL_ENABLED=true)，检查证书状态..."
+
     # 检查证书是否存在
     local certs_dir="conf/elasticsearch/certs"
     local cert_files=(
@@ -264,36 +292,54 @@ check_and_generate_elk_certs() {
         "$certs_dir/logstash/logstash.crt"
         "$certs_dir/logstash/logstash.key"
     )
-    
+
     local missing_certs=false
+    local missing_cert_list=""
     for cert_file in "${cert_files[@]}"; do
         if [[ ! -f "$cert_file" ]]; then
             missing_certs=true
-            break
+            missing_cert_list+="  ❌ $cert_file\n"
         fi
     done
-    
+
     if [[ "$missing_certs" == "true" ]]; then
-        info "🔐 检测到生产环境需要SSL证书，但证书文件不完整"
+        warning "⚠️  检测到SSL证书文件不完整或缺失："
+        echo -e "$missing_cert_list"
         info "正在自动生成SSL证书..."
-        
+        echo ""
+
         local cert_script="scripts/generate-elk-certs.sh"
         if [[ ! -f "$cert_script" ]]; then
             error "证书生成脚本不存在: $cert_script"
+            error "请确保脚本位于: $cert_script"
             return 1
         fi
-        
+
         # 执行证书生成脚本
+        info "执行证书生成脚本: $cert_script"
         if bash "$cert_script"; then
+            echo ""
             success "✅ SSL证书生成完成"
+            info "证书已保存至: $certs_dir"
         else
-            error "SSL证书生成失败，请检查脚本输出"
+            echo ""
+            error "❌ SSL证书生成失败，请检查脚本输出"
+            error "提示: 您可以手动运行 ./$cert_script 来生成证书"
             return 1
         fi
     else
-        info "✅ SSL证书文件完整，跳过生成"
+        success "✅ SSL证书文件完整，验证通过"
+
+        # 检查证书是否过期（可选）
+        local ca_cert="$certs_dir/ca/ca.crt"
+        if command -v openssl &> /dev/null && [[ -f "$ca_cert" ]]; then
+            local expiry_date=$(openssl x509 -in "$ca_cert" -noout -enddate 2>/dev/null | cut -d= -f2)
+            if [[ -n "$expiry_date" ]]; then
+                info "证书有效期至: $expiry_date"
+            fi
+        fi
     fi
-    
+
     return 0
 }
 
@@ -304,7 +350,7 @@ execute_compose_command() {
     local options="$3"
     shift 3
     local services=("$@")
-    
+
     # 在启动操作时，检查ELK证书（仅生产环境）
     if [[ "$operation" == "up" || "$operation" == "start" ]]; then
         if ! check_and_generate_elk_certs "$environment" "${services[@]}"; then
@@ -312,7 +358,7 @@ execute_compose_command() {
             return 1
         fi
     fi
-    
+
     # Web服务冲突检测
     local has_nginx=false
     local has_tengine=false
@@ -323,7 +369,7 @@ execute_compose_command() {
             has_tengine=true
         fi
     done
-    
+
     if [[ "$has_nginx" == "true" && "$has_tengine" == "true" ]]; then
         echo -e "${RED}❌ 检测到同时指定了 nginx 和 tengine 服务！${NC}" >&2
         echo "" >&2
@@ -337,14 +383,38 @@ execute_compose_command() {
         echo "" >&2
         exit 1
     fi
-    
+
+    # redis冲突检测
+    local has_redis=false
+    local has_valkey=false
+    for service in "${services[@]}"; do
+        if [[ "$service" == "redis" ]]; then
+            has_redis=true
+        elif [[ "$service" == "valkey" ]]; then
+            has_valkey=true
+        fi
+    done
+
+    if [[ "$has_redis" == "true" && "$has_valkey" == "true" ]]; then
+        echo -e "${RED}❌ 检测到同时指定了 redis 和 valkey 服务！${NC}" >&2
+        echo "" >&2
+        echo -e "${YELLOW}${BOLD}⚠️  重要提示：${NC}" >&2
+        echo -e "  • valkey 服务衍生于redis，属于同类型产品，相互兼容，不可同时启动。" >&2
+        echo "" >&2
+        echo -e "${CYAN}请选择其中一种缓存服务器：${NC}" >&2
+        echo -e "  ./up.sh redis $operation     # 使用redis" >&2
+        echo -e "  ./up.sh valkey $operation   # 使用valkey" >&2
+        echo "" >&2
+        exit 1
+    fi
+
     # 获取compose文件
     local compose_files=$(get_compose_files "$environment" "${services[@]}")
-    
+
     # 处理特殊组合
     local final_services=()
     local web_services=()  # 用于存储Web服务器
-    
+
     for service in "${services[@]}"; do
         local special_services=$(get_special_services "$service")
         if [[ -n "$special_services" ]]; then
@@ -359,27 +429,27 @@ execute_compose_command() {
             fi
         fi
     done
-    
+
     # 如果不是restart操作，将Web服务器重新加回到final_services
     if [[ "$operation" != "restart" && ${#web_services[@]} -gt 0 ]]; then
         final_services+=("${web_services[@]}")
         web_services=()  # 清空web_services数组
     fi
-    
+
     # 自动添加MySQL备份服务
     auto_add_mysql_backup final_services "$operation"
-    
+
     # 提示信息
     if [[ "$operation" == "restart" && ${#web_services[@]} -gt 0 ]]; then
         info "检测到Web服务器 (${web_services[*]})，将在其他服务重启完成后最后重启"
     fi
-    
+
     # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
     local compose_cmd=$(get_docker_compose_cmd)
-    
+
     # 构建Docker命令
     local docker_cmd="$compose_cmd $compose_files"
-    
+
     case "$operation" in
         up|start)
             # 检查镜像是否存在
@@ -391,7 +461,7 @@ execute_compose_command() {
                         missing_images+=("$service")
                     fi
                 done
-                
+
                 if [[ ${#missing_images[@]} -gt 0 ]]; then
                     echo -e "${YELLOW}⚠️  检测到以下服务的镜像未构建：${missing_images[*]}${NC}"
                     echo ""
@@ -401,11 +471,11 @@ execute_compose_command() {
                     echo -e "  ${YELLOW}q/Q${NC} - 退出操作"
                     echo ""
                     read -p "请选择 [y/n/q]: " choice
-                    
+
                     case "$choice" in
                         [Yy]*)
                             info "开始构建镜像: ${missing_images[*]}"
-                            
+
                             # 处理ELK服务的特殊映射
                             local build_services=()
                             for service in "${missing_images[@]}"; do
@@ -421,7 +491,7 @@ execute_compose_command() {
                                         ;;
                                 esac
                             done
-                            
+
                             if ./build.sh "${build_services[@]}"; then
                                 success "镜像构建完成，继续启动服务"
                             else
@@ -444,12 +514,12 @@ execute_compose_command() {
                                     available_services+=("$service")
                                 fi
                             done
-                            
+
                             if [[ ${#available_services[@]} -eq 0 ]]; then
                                 warn "没有可启动的服务，操作终止"
                                 return 1
                             fi
-                            
+
                             final_services=("${available_services[@]}")
                             info "将启动已构建的服务: ${final_services[*]}"
                             ;;
@@ -464,7 +534,7 @@ execute_compose_command() {
                     esac
                 fi
             fi
-            
+
             docker_cmd="$docker_cmd up --no-build"
             if [[ "$options" =~ -d|--detach ]]; then
                 docker_cmd="$docker_cmd -d"
@@ -480,11 +550,11 @@ execute_compose_command() {
                 info "步骤1: 重启其他服务 (${final_services[*]})"
                 docker_cmd="$docker_cmd restart ${final_services[*]}"
                 eval "$docker_cmd"
-                
+
                 # 等待一下，确保其他服务启动完成
                 info "等待其他服务启动完成..."
                 sleep 3
-                
+
                 # 再重启Web服务器
                 info "步骤2: 重启Web服务器 (${web_services[*]})"
                 docker_cmd="$compose_cmd $compose_files restart ${web_services[*]}"
@@ -525,25 +595,25 @@ execute_compose_command() {
             error "未知操作: $operation"
             ;;
     esac
-    
+
     # 添加服务名（除了某些特殊操作）
     if [[ "$operation" != "exec" ]] && [[ ${#final_services[@]} -gt 0 ]]; then
         docker_cmd="$docker_cmd ${final_services[*]}"
     fi
-    
+
     # 执行命令
     log "执行命令: $docker_cmd"
     info "操作: $operation"
     info "环境: $environment"
     info "服务: ${final_services[*]:-所有服务}"
-    
+
     eval "$docker_cmd"
 }
 
 # 系统清理操作
 system_operations() {
     local operation="$1"
-    
+
     case "$operation" in
         clear)
             log "执行Docker系统清理（未使用的资源）..."
@@ -576,14 +646,14 @@ system_operations() {
             echo -e "  • 清理构建缓存"
             echo ""
             read -p "确认执行彻底清理？(yes/no): " confirm
-            
+
             if [[ "$confirm" != "yes" && "$confirm" != "y" && "$confirm" != "Y" ]]; then
                 info "操作已取消"
                 exit 0
             fi
-            
+
             log "开始彻底清理所有Docker资源..."
-            
+
             # 1. 停止并删除所有容器
             info "步骤1: 停止并删除所有容器..."
             local containers=$(docker container ls -a -q 2>/dev/null || echo "")
@@ -594,7 +664,7 @@ system_operations() {
             else
                 info "没有找到容器"
             fi
-            
+
             # 2. 删除所有镜像
             info "步骤2: 删除所有镜像..."
             local images=$(docker images -q 2>/dev/null || echo "")
@@ -604,7 +674,7 @@ system_operations() {
             else
                 info "没有找到镜像"
             fi
-            
+
             # 3. 删除所有网络（除了默认网络）
             info "步骤3: 删除所有自定义网络..."
             local networks=$(docker network ls --filter "type=custom" -q 2>/dev/null || echo "")
@@ -614,7 +684,7 @@ system_operations() {
             else
                 info "没有找到自定义网络"
             fi
-            
+
             # 4. 删除所有卷
             info "步骤4: 删除所有卷..."
             local volumes=$(docker volume ls -q 2>/dev/null || echo "")
@@ -624,16 +694,16 @@ system_operations() {
             else
                 info "没有找到卷"
             fi
-            
+
             # 5. 清理构建缓存
             info "步骤5: 清理构建缓存..."
             docker builder prune -a -f 2>/dev/null || true
             info "构建缓存清理完成"
-            
+
             # 6. 最终清理
             info "步骤6: 执行最终系统清理..."
             docker system prune -a -f --volumes 2>/dev/null || true
-            
+
             success "彻底清理完成！所有容器、镜像、网络和卷已删除"
             ;;
         *)
@@ -645,18 +715,18 @@ system_operations() {
 # 显示服务状态
 show_status() {
     local environment="$1"
-    
+
     log "显示服务状态..."
-    
+
     # 显示所有compose文件的状态
     local compose_files="-f docker-compose.yaml -f docker-compose.${environment}.yaml"
-    
+
     # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
     local compose_cmd=$(get_docker_compose_cmd)
-    
+
     echo -e "\n${CYAN}=== 主要服务状态 ===${NC}"
     $compose_cmd $compose_files ps 2>/dev/null || warn "无法获取主要服务状态"
-    
+
     # 检查ELK服务是否真的存在和运行
     echo -e "\n${CYAN}=== ELK服务状态 ===${NC}"
     if [[ -f "docker-compose-ELK.yaml" ]]; then
@@ -670,7 +740,7 @@ show_status() {
     else
         info "ELK配置文件不存在"
     fi
-    
+
     # 检查SGR服务是否真的存在和运行
     echo -e "\n${CYAN}=== SGR服务状态 ===${NC}"
     if [[ -f "docker-compose-spug+gitea+rap2.yaml" ]]; then
@@ -684,7 +754,7 @@ show_status() {
     else
         info "SGR配置文件不存在"
     fi
-    
+
     echo -e "\n${CYAN}=== 系统资源使用情况 ===${NC}"
     # 获取容器统计信息，同时显示容器ID和名称
     if docker stats --no-stream --format "table {{.Container}}\t{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}" 2>/dev/null | head -1 | grep -q "CONTAINER"; then
@@ -779,17 +849,17 @@ cd "$PROJECT_DIR"
 check_layered_config() {
     local config_dir="config/env"
     local required_configs=("base.env" "web.env" "php.env" "database.env" "redis.env")
-    
+
     if [[ ! -d "$config_dir" ]]; then
         error "配置目录 $config_dir 不存在，请确保项目使用分层配置"
     fi
-    
+
     for config in "${required_configs[@]}"; do
         if [[ ! -f "$config_dir/$config" ]]; then
             warn "配置文件 $config_dir/$config 不存在"
         fi
     done
-    
+
     info "检测到分层配置，已验证配置文件结构"
 }
 
@@ -805,13 +875,13 @@ check_layered_config
 load_environment_variables() {
     local config_dir="config/env"
     local env_files=("base.env" "web.env" "php.env" "database.env" "redis.env" "elk.env" "apps.env")
-    
+
     # 保存当前的ENVIRONMENT值（由命令行参数设置）
     local saved_environment="$ENVIRONMENT"
-    
+
     # 设置导出模式
     set -a
-    
+
     # 加载基础配置文件
     for env_file in "${env_files[@]}"; do
         local file_path="$config_dir/$env_file"
@@ -820,13 +890,13 @@ load_environment_variables() {
             source <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$file_path" 2>/dev/null | grep -v '^ENVIRONMENT=' || true)
         fi
     done
-    
+
     # 恢复ENVIRONMENT值
     ENVIRONMENT="$saved_environment"
-    
+
     # 根据指定环境加载特定的环境配置（会覆盖基础配置）
     local env_specific_files=()
-    
+
     # 检查是否有ELK服务，如果有，加载对应的环境配置
     if [[ " ${SERVICES[@]} " =~ " elk " ]] || [[ ${#SERVICES[@]} -eq 0 ]]; then
         # 标准化环境名称（将所有变体统一为简短形式）
@@ -838,7 +908,7 @@ load_environment_variables() {
             staging|stage) env_name="staging" ;;
             *) env_name="dev" ;;  # 默认为dev
         esac
-        
+
         # 检查ELK环境配置文件
         local elk_env_file="$config_dir/elk.${env_name}.env"
         if [[ -f "$elk_env_file" ]]; then
@@ -848,7 +918,7 @@ load_environment_variables() {
             warn "未找到ELK环境配置文件: $elk_env_file，使用默认配置"
         fi
     fi
-    
+
     # 关闭导出模式
     set +a
 }
@@ -890,40 +960,40 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
         up|start)
             log "启动所有已构建的服务..."
             compose_files=$(get_compose_files "$ENVIRONMENT")
-            
+
             # 获取所有已构建的镜像对应的服务
             available_services=()
-            
+
             # 检查主要服务的镜像是否存在
-            for service in php84_apache php83_apache php82_apache php81_apache php80_apache php74_apache php72_apache nginx tengine mysql mysql_backup redis valkey mongo postgres; do
+            for service in php85_apache php84_apache php83_apache php82_apache php81_apache php80_apache php74_apache php72_apache nginx tengine mysql mysql_backup redis valkey mongo postgres; do
                 if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "hg_dnmpr-$service:latest" 2>/dev/null; then
                     available_services+=("$service")
                 fi
             done
-            
+
             # 自动添加MySQL备份服务
             auto_add_mysql_backup available_services "$OPERATION"
-            
+
             if [[ ${#available_services[@]} -eq 0 ]]; then
                 warn "没有找到已构建的镜像，请先使用 ./build.sh 构建所需的服务"
                 info "例如: ./build.sh php84 nginx mysql"
                 exit 1
             fi
-            
+
             info "找到 ${#available_services[@]} 个已构建的服务: ${available_services[*]}"
-            
+
             # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
             compose_cmd=$(get_docker_compose_cmd)
-            
+
             # 只启动已构建的服务
             docker_cmd="$compose_cmd $compose_files up --no-build"
             if [[ "$DETACH" == "true" ]]; then
                 docker_cmd="$docker_cmd -d"
             fi
-            
+
             # 添加已构建的服务名
             docker_cmd="$docker_cmd ${available_services[*]}"
-            
+
             eval "$docker_cmd"
             success "已构建的服务启动完成"
             ;;
@@ -931,11 +1001,11 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             log "停止所有正在运行的服务..."
             # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
             compose_cmd=$(get_docker_compose_cmd)
-            
+
             # 停止主要服务
             compose_files=$(get_compose_files "$ENVIRONMENT")
             $compose_cmd $compose_files stop
-            
+
             # 停止ELK服务（如果存在且正在运行）
             if [[ -f "docker-compose-ELK.yaml" ]]; then
                 elk_containers=$(docker ps --filter "label=com.docker.compose.project=hg_dnmpr" --format "{{.Names}}" | grep -E "elasticsearch|kibana|logstash" 2>/dev/null || echo "")
@@ -944,7 +1014,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                     $compose_cmd -f docker-compose-ELK.yaml stop
                 fi
             fi
-            
+
             # 停止SGR服务（如果存在且正在运行）
             if [[ -f "docker-compose-spug+gitea+rap2.yaml" ]]; then
                 sgr_containers=$(docker ps --filter "label=com.docker.compose.project=hg_dnmpr" --format "{{.Names}}" | grep -E "spug|gitea|rap2" 2>/dev/null || echo "")
@@ -953,30 +1023,30 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                     $compose_cmd -f docker-compose-spug+gitea+rap2.yaml stop
                 fi
             fi
-            
+
             success "所有服务已停止"
             ;;
         down)
             log "停止并卸载所有服务..."
             # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
             compose_cmd=$(get_docker_compose_cmd)
-            
+
             # 停止并删除主要服务
             compose_files=$(get_compose_files "$ENVIRONMENT")
             $compose_cmd $compose_files down
-            
+
             # 停止并删除ELK服务（如果存在）
             if [[ -f "docker-compose-ELK.yaml" ]]; then
                 info "停止并卸载ELK服务..."
                 $compose_cmd -f docker-compose-ELK.yaml down 2>/dev/null || true
             fi
-            
+
             # 停止并删除SGR服务（如果存在）
             if [[ -f "docker-compose-spug+gitea+rap2.yaml" ]]; then
                 info "停止并卸载SGR服务..."
                 $compose_cmd -f docker-compose-spug+gitea+rap2.yaml down 2>/dev/null || true
             fi
-            
+
             # 清理所有容器（包括不在当前项目中定义的）
             info "清理所有容器..."
             all_containers=$(docker ps -a -q 2>/dev/null || echo "")
@@ -986,7 +1056,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             else
                 info "没有发现任何容器"
             fi
-            
+
             # 清理所有网络（除了默认网络）
             info "清理自定义网络..."
             custom_networks=$(docker network ls --filter "type=custom" -q 2>/dev/null || echo "")
@@ -996,23 +1066,23 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             else
                 info "没有发现自定义网络"
             fi
-            
+
             # 清理未使用的镜像（可选）
             info "清理未使用的镜像..."
             docker image prune -f 2>/dev/null || true
-            
+
             success "所有容器和网络已清理完成"
             ;;
         restart)
             log "重启所有服务..."
             # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
             compose_cmd=$(get_docker_compose_cmd)
-            
+
             compose_files=$(get_compose_files "$ENVIRONMENT")
-            
+
             # 获取所有运行中的容器名称（包括主服务和ELK服务）
             running_containers=$($compose_cmd $compose_files ps --format "{{.Name}}" 2>/dev/null || echo "")
-            
+
             # 如果存在ELK compose文件，也获取ELK服务的容器
             if [[ -f "docker-compose-ELK.yaml" ]]; then
                 elk_running_containers=$($compose_cmd -f docker-compose-ELK.yaml ps --format "{{.Name}}" 2>/dev/null || echo "")
@@ -1021,7 +1091,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                     running_containers=$(echo -e "$running_containers\n$elk_running_containers")
                 fi
             fi
-            
+
             # 检查是否需要自动添加 mysql_backup 服务
             restart_services=()
             elk_services=()
@@ -1033,19 +1103,19 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                         if [[ "$container_name" == "elasticsearch" || "$container_name" == "kibana" || "$container_name" == "logstash" ]]; then
                             elk_services+=("$container_name")
                         else
-                            restart_services+=("$container_name")
+                        restart_services+=("$container_name")
                         fi
                     fi
                 done <<< "$running_containers"
-                
+
                 # 自动添加MySQL备份服务
                 auto_add_mysql_backup restart_services "restart"
             fi
-            
+
             # 检查是否有运行中的Web服务器（nginx或tengine）
             running_web_services=()
             running_other_services=()
-            
+
             if [[ ${#restart_services[@]} -gt 0 ]]; then
                 # 分类运行中的服务
                 for container_name in "${restart_services[@]}"; do
@@ -1055,23 +1125,23 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                         running_other_services+=("$container_name")
                     fi
                 done
-                
+
                 # 如果有Web服务器和其他服务同时运行，分步重启
                 if [[ ${#running_web_services[@]} -gt 0 && ${#running_other_services[@]} -gt 0 ]]; then
                     info "检测到Web服务器 (${running_web_services[*]})，将分步重启以确保服务稳定性"
-                    
+
                     # 步骤1：重启其他服务
                     info "步骤1: 重启后端服务 (${running_other_services[*]})"
                     $compose_cmd $compose_files restart ${running_other_services[*]}
-                    
+
                     # 等待后端服务启动完成
                     info "等待后端服务启动完成..."
                     sleep 3
-                    
+
                     # 步骤2：重启Web服务器
                     info "步骤2: 重启Web服务器 (${running_web_services[*]})"
                     $compose_cmd $compose_files restart ${running_web_services[*]}
-                    
+
                     # 步骤3：重启ELK服务（如果存在）
                     if [[ ${#elk_services[@]} -gt 0 ]]; then
                         info "步骤3: 重启ELK服务 (${elk_services[*]})"
@@ -1081,7 +1151,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                             warn "未找到 docker-compose-ELK.yaml 文件，跳过ELK服务重启"
                         fi
                     fi
-                    
+
                     success "所有服务重启完成"
                 else
                     # 如果只有Web服务器或只有其他服务，重启指定的服务
@@ -1090,7 +1160,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                     else
                         $compose_cmd $compose_files restart
                     fi
-                    
+
                     # 重启ELK服务（如果存在）
                     if [[ ${#elk_services[@]} -gt 0 ]]; then
                         info "重启ELK服务 (${elk_services[*]})"
@@ -1100,7 +1170,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                             warn "未找到 docker-compose-ELK.yaml 文件，跳过ELK服务重启"
                         fi
                     fi
-                    
+
                     success "所有服务重启完成"
                 fi
             else
@@ -1115,8 +1185,8 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                     fi
                 else
                     # 正常重启
-                    $compose_cmd $compose_files restart
-                    success "所有服务重启完成"
+                $compose_cmd $compose_files restart
+                success "所有服务重启完成"
                 fi
             fi
             ;;

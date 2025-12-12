@@ -1,3 +1,29 @@
 #!/bin/bash
 
-docker inspect --format='{{.Name}} -- {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $(docker ps -aq)
+# 增强版容器IP显示脚本 - 显示网络名称和对应IP地址
+
+echo "Container Network Information:"
+echo "==============================="
+
+for container_id in $(docker ps -aq); do
+    container_name=$(docker inspect --format='{{.Name}}' "$container_id" | sed 's/\///')
+
+    # 获取网络数量
+    network_count=$(docker inspect --format='{{len .NetworkSettings.Networks}}' "$container_id")
+
+    if [ "$network_count" -eq 0 ]; then
+        echo "[$container_name] -- No networks"
+        continue
+    fi
+
+    # 如果只有一个网络，简化显示
+    if [ "$network_count" -eq 1 ]; then
+        ip=$(docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container_id")
+        network=$(docker inspect --format='{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$container_id")
+        echo "[$container_name] -- $ip ($network)"
+    else
+        # 多个网络时，分行显示
+        echo "[$container_name]"
+        docker inspect --format='{{range $k, $v := .NetworkSettings.Networks}}  {{$k}}: {{$v.IPAddress}}{{"\n"}}{{end}}' "$container_id"
+    fi
+done
