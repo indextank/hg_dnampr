@@ -18,8 +18,8 @@ services:
     container_name: spug
     privileged: true
     volumes:
-      - ${SPUG_DATA_DIR}/service:/data/spug
-      - ${SPUG_DATA_DIR}/repos:/data/repos
+      - spug_service_data:/data/spug # 使用 Docker named volume 进行数据持久化
+      - spug_repos_data:/data/repos # 使用 Docker named volume 进行数据持久化
     ports:
       # 如果80端口被占用可替换为其他端口，例如: - "8000:80"
       - "${SPUG_PORT}:80"
@@ -58,7 +58,7 @@ services:
     networks:
       - lnamp_network
     volumes:
-      - ${DATA_PATH_HOST}/gitea:/data
+      - gitea_data:/data # 使用 Docker named volume 进行数据持久化
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
     ports:
@@ -124,6 +124,16 @@ services:
     extends:
       file: compose_databases.yaml
       service: redis-server
+
+volumes:
+  # Spug数据卷
+  spug_service_data:
+    driver: local
+  spug_repos_data:
+    driver: local
+  # Gitea数据卷
+  gitea_data:
+    driver: local
 
 networks:
   lnamp_network:

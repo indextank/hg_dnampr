@@ -2,6 +2,8 @@
 
 # 设置错误处理
 set -e
+# 启用管道失败检测（管道中任何命令失败都会导致整个管道失败）
+set -o pipefail
 
 # 设置 MySQL 容器名称、用户名和密码
 MYSQL_CONTAINER_NAME='mysql'
@@ -79,6 +81,19 @@ install_pv_if_needed() {
                 return 1
             fi
         fi
+    elif command -v pacman >/dev/null 2>&1; then
+        # Arch Linux 系统
+        if [ "$(id -u)" = "0" ]; then
+            pacman -Sy --noconfirm pv >/dev/null 2>&1
+        else
+            echo "需要 root 权限来安装 pv，尝试使用 sudo..."
+            if command -v sudo >/dev/null 2>&1; then
+                sudo pacman -Sy --noconfirm pv >/dev/null 2>&1
+            else
+                echo "⚠️  无法安装 pv（需要 root 权限），将使用简单进度显示"
+                return 1
+            fi
+        fi
     else
         echo "⚠️  无法识别系统类型，无法自动安装 pv，将使用简单进度显示"
         return 1
@@ -115,14 +130,59 @@ restore_file_with_progress() {
     
     if [ "$file_size" = "0" ]; then
         echo "⚠️  无法获取文件大小，使用普通模式恢复"
+        # 创建临时文件用于捕获错误
+        local error_file="/tmp/mysql_restore_error_$$.txt"
+        local restore_status=0
+        
         if [ -n "$db_name" ]; then
-            gunzip < "$backup_file" | docker exec -i $MYSQL_CONTAINER_NAME \
-            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD $db_name 2>/dev/null
+            gunzip < "$backup_file" 2>&1 | \
+            sed -e '/^SET @@GLOBAL.GTID_PURGED=/d' -e '/^SET @@SESSION.SQL_LOG_BIN=/d' | \
+            docker exec -i $MYSQL_CONTAINER_NAME \
+            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD $db_name 2>"$error_file" || restore_status=$?
         else
-            gunzip < "$backup_file" | docker exec -i $MYSQL_CONTAINER_NAME \
-            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>/dev/null
+            gunzip < "$backup_file" 2>&1 | \
+            sed -e '/^SET @@GLOBAL.GTID_PURGED=/d' -e '/^SET @@SESSION.SQL_LOG_BIN=/d' | \
+            docker exec -i $MYSQL_CONTAINER_NAME \
+            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>"$error_file" || restore_status=$?
         fi
-        return $?
+        
+        # 检查是否有真正的错误（排除警告信息）
+        if [ $restore_status -ne 0 ]; then
+            # 恢复失败，显示错误信息
+            if [ -s "$error_file" ]; then
+                echo ""
+                echo "❌ MySQL 错误信息："
+                # 过滤掉警告信息，只显示真正的错误
+                cat "$error_file" | grep -v "^$" | grep -v "\[Warning\]" | grep -v "Using a password" | head -10
+                # 如果过滤后还有内容，说明有真正的错误
+                local real_errors=$(cat "$error_file" | grep -v "^$" | grep -v "\[Warning\]" | grep -v "Using a password" | wc -l)
+                if [ "$real_errors" -eq 0 ]; then
+                    # 只有警告，没有真正的错误，恢复可能成功
+                    echo "⚠️  仅检测到警告信息，恢复可能已成功"
+                fi
+            fi
+            rm -f "$error_file" 2>/dev/null || true
+            return $restore_status
+        elif [ -s "$error_file" ]; then
+            # 恢复状态为0，但错误文件有内容，可能是警告
+            local warnings=$(cat "$error_file" | grep -v "^$" | grep -c "\[Warning\]" || echo "0")
+            local real_errors=$(cat "$error_file" | grep -v "^$" | grep -v "\[Warning\]" | grep -v "Using a password" | wc -l)
+            
+            if [ "$real_errors" -gt 0 ]; then
+                # 有真正的错误
+                echo ""
+                echo "⚠️  MySQL 警告/错误信息："
+                cat "$error_file" | grep -v "^$" | head -10
+            elif [ "$warnings" -gt 0 ]; then
+                # 只有警告，不影响恢复
+                echo ""
+                echo "ℹ️  MySQL 警告信息（不影响恢复）："
+                cat "$error_file" | grep -v "^$" | head -5
+            fi
+        fi
+        
+        rm -f "$error_file" 2>/dev/null || true
+        return 0
     fi
     
     # 格式化文件大小显示
@@ -138,14 +198,61 @@ restore_file_with_progress() {
     # 如果系统有 pv 命令，使用它显示进度（显示百分比、速度、剩余时间）
     if [ "$HAS_PV" = true ]; then
         echo "正在恢复（显示详细进度）..."
+        # 创建临时文件用于捕获错误
+        local error_file="/tmp/mysql_restore_error_$$.txt"
+        local restore_status=0
+        
         if [ -n "$db_name" ]; then
-            pv -p -t -e -r -b -s "$file_size" "$backup_file" | gunzip | docker exec -i $MYSQL_CONTAINER_NAME \
-            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD $db_name 2>/dev/null
+            # pv 的进度输出到 stderr（终端），数据输出到 stdout
+            pv -p -t -e -r -b -s "$file_size" "$backup_file" 2>&2 | gunzip 2>/dev/null | \
+            sed -e '/^SET @@GLOBAL.GTID_PURGED=/d' -e '/^SET @@SESSION.SQL_LOG_BIN=/d' | \
+            docker exec -i $MYSQL_CONTAINER_NAME \
+            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD $db_name 2>"$error_file" || restore_status=$?
         else
-            pv -p -t -e -r -b -s "$file_size" "$backup_file" | gunzip | docker exec -i $MYSQL_CONTAINER_NAME \
-            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>/dev/null
+            # pv 的进度输出到 stderr（终端），数据输出到 stdout
+            pv -p -t -e -r -b -s "$file_size" "$backup_file" 2>&2 | gunzip 2>/dev/null | \
+            sed -e '/^SET @@GLOBAL.GTID_PURGED=/d' -e '/^SET @@SESSION.SQL_LOG_BIN=/d' | \
+            docker exec -i $MYSQL_CONTAINER_NAME \
+            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>"$error_file" || restore_status=$?
         fi
-        return $?
+        
+        # 检查是否有真正的错误（排除警告信息）
+        if [ $restore_status -ne 0 ]; then
+            # 恢复失败，显示错误信息
+            if [ -s "$error_file" ]; then
+                echo ""
+                echo "❌ MySQL 错误信息："
+                # 过滤掉警告信息，只显示真正的错误
+                cat "$error_file" | grep -v "^$" | grep -v "\[Warning\]" | grep -v "Using a password" | head -10
+                # 如果过滤后还有内容，说明有真正的错误
+                local real_errors=$(cat "$error_file" | grep -v "^$" | grep -v "\[Warning\]" | grep -v "Using a password" | wc -l)
+                if [ "$real_errors" -eq 0 ]; then
+                    # 只有警告，没有真正的错误，恢复可能成功
+                    echo "⚠️  仅检测到警告信息，恢复可能已成功"
+                fi
+            fi
+            rm -f "$error_file" 2>/dev/null || true
+            return $restore_status
+        elif [ -s "$error_file" ]; then
+            # 恢复状态为0，但错误文件有内容，可能是警告
+            local warnings=$(cat "$error_file" | grep -v "^$" | grep -c "\[Warning\]" || echo "0")
+            local real_errors=$(cat "$error_file" | grep -v "^$" | grep -v "\[Warning\]" | grep -v "Using a password" | wc -l)
+            
+            if [ "$real_errors" -gt 0 ]; then
+                # 有真正的错误
+                echo ""
+                echo "⚠️  MySQL 警告/错误信息："
+                cat "$error_file" | grep -v "^$" | head -10
+            elif [ "$warnings" -gt 0 ]; then
+                # 只有警告，不影响恢复
+                echo ""
+                echo "ℹ️  MySQL 警告信息（不影响恢复）："
+                cat "$error_file" | grep -v "^$" | head -5
+            fi
+        fi
+        
+        rm -f "$error_file" 2>/dev/null || true
+        return 0
     else
         # 没有 pv 命令，使用简单的进度显示（显示已用时间和估算进度）
         echo "正在恢复（显示时间进度）..."
@@ -153,18 +260,21 @@ restore_file_with_progress() {
         local bytes_read=0
         local progress_file="/tmp/restore_progress_$$.txt"
         
+        # 创建临时文件用于捕获错误
+        local error_file="/tmp/mysql_restore_error_$$.txt"
+        
         # 启动恢复进程，使用 dd 的 status=progress 选项来监控进度
         if [ -n "$db_name" ]; then
             (
                 # 使用 dd 读取文件，每 1MB 输出一次进度
-                dd if="$backup_file" bs=1M status=progress 2>"$progress_file" | gunzip | docker exec -i $MYSQL_CONTAINER_NAME \
-                mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD $db_name 2>/dev/null
+                dd if="$backup_file" bs=1M status=progress 2>"$progress_file" | gunzip 2>&1 | docker exec -i $MYSQL_CONTAINER_NAME \
+                mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD $db_name 2>"$error_file"
             ) &
             local restore_pid=$!
         else
             (
-                dd if="$backup_file" bs=1M status=progress 2>"$progress_file" | gunzip | docker exec -i $MYSQL_CONTAINER_NAME \
-                mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>/dev/null
+                dd if="$backup_file" bs=1M status=progress 2>"$progress_file" | gunzip 2>&1 | docker exec -i $MYSQL_CONTAINER_NAME \
+                mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>"$error_file"
             ) &
             local restore_pid=$!
         fi
@@ -242,14 +352,28 @@ restore_file_with_progress() {
         wait $restore_pid
         local restore_status=$?
         
+        # 检查是否有错误
+        if [ $restore_status -ne 0 ] || [ -s "$error_file" ]; then
+            if [ -s "$error_file" ]; then
+                echo ""
+                echo "❌ MySQL 错误信息："
+                cat "$error_file" | grep -v "^$" | head -10
+            fi
+        fi
+        
         # 清理临时文件
-        rm -f "$progress_file" 2>/dev/null || true
+        rm -f "$progress_file" "$error_file" 2>/dev/null || true
         
         # 显示完成信息
         local total_elapsed=$(($(date +%s) - start_time))
         local total_min=$((total_elapsed / 60))
         local total_sec=$((total_elapsed % 60))
-        printf "\r✅ 恢复完成！总用时: %02d:%02d\n" "$total_min" "$total_sec"
+        
+        if [ $restore_status -eq 0 ]; then
+            printf "\r✅ 恢复完成！总用时: %02d:%02d\n" "$total_min" "$total_sec"
+        else
+            printf "\r❌ 恢复失败！总用时: %02d:%02d\n" "$total_min" "$total_sec"
+        fi
         
         return $restore_status
     fi
@@ -733,7 +857,9 @@ complete_cleanup_restore() {
             read -p "输入备份文件路径: " BACKUP_FILE_PATH
             if [ -f "$BACKUP_FILE_PATH" ]; then
                 echo "正在恢复所有数据库..."
-                gunzip < "$BACKUP_FILE_PATH" | docker exec -i $MYSQL_CONTAINER_NAME \
+                gunzip < "$BACKUP_FILE_PATH" | \
+                sed -e '/^SET @@GLOBAL.GTID_PURGED=/d' -e '/^SET @@SESSION.SQL_LOG_BIN=/d' | \
+                docker exec -i $MYSQL_CONTAINER_NAME \
                 mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>/dev/null
                 
                 if [ $? -eq 0 ]; then

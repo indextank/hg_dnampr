@@ -25,6 +25,8 @@ RUN set -eux; \
     apt-get clean all
 
 COPY ./src/elk/logstash ${TMP_DIR}
+# 复制下载辅助脚本
+COPY ./scripts/download-helper.sh /tmp/download-helper.sh
 
 WORKDIR ${TMP_DIR}
 
@@ -32,9 +34,12 @@ RUN set -eux; \
     \
 	cd "${TMP_DIR}"; \
 	\
-	if [ ! -f "logstash-${ELK_VERSION}-linux-$(arch).tar.gz" ]; then \
-        wget --limit-rate=100M --tries=6 -c --no-check-certificate "https://artifacts.elastic.co/downloads/logstash/logstash-${ELK_VERSION}-linux-$(arch).tar.gz"; \
-	fi; \
+	# 使用 bash 加载下载辅助脚本并执行下载
+	bash -c '. /tmp/download-helper.sh && \
+	download_if_missing "https://artifacts.elastic.co/downloads/logstash/logstash-${ELK_VERSION}-linux-$(arch).tar.gz" "logstash-${ELK_VERSION}-linux-$(arch).tar.gz" || { \
+		echo "下载失败"; \
+		exit 1; \
+	}'; \
 	\
     mkdir -p /usr/share; \
     tar zxf ${TMP_DIR}/logstash-${ELK_VERSION}-linux-$(arch).tar.gz -C /usr/share/; \

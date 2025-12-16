@@ -119,6 +119,9 @@ services:
 
 volumes:
   feed-icons:
+  # PostgreSQL数据卷（postgres服务需要）
+  postgres_data:
+    driver: local
 
 networks:
   default:

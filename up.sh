@@ -25,7 +25,7 @@ ${YELLOW}使用方法:${NC}
     $0 [服务名...] [操作] [选项]
 
 ${YELLOW}服务名:${NC}
-    php84, php83, php82, php81, php80, php74, php72  - PHP服务
+    php85, php84, php83, php82, php81, php80, php74, php72  - PHP服务
     nginx, tengine                                    - Web服务器 ⚠️ 二选一
     mysql                                            - MySQL数据库
     redis, valkey                                     - 缓存服务
@@ -128,10 +128,133 @@ map_service_name() {
     esac
 }
 
+# 检测是否为WSL环境
+is_wsl_environment() {
+    # 方法1: 检查环境变量
+    if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
+        return 0  # 是WSL环境
+    fi
+
+    # 方法2: 检查内核版本信息
+    if [[ -f "/proc/version" ]] && grep -qi "microsoft\|wsl" /proc/version 2>/dev/null; then
+        return 0  # 是WSL环境
+    fi
+
+    # 方法3: 检查内核release信息
+    if [[ -f "/proc/sys/kernel/osrelease" ]] && grep -qi "microsoft\|wsl" /proc/sys/kernel/osrelease 2>/dev/null; then
+        return 0  # 是WSL环境
+    fi
+
+    return 1  # 不是WSL环境
+}
+
+# 同步 hosts 别名映射（调用 scripts/update-hosts-aliases.sh）
+sync_hosts_aliases() {
+    local operation="$1"
+    local services_list="${2:-}"  # 可选：指定服务列表，用空格分隔
+    local mode="update"
+
+    case "$operation" in
+        stop|down|delete|purge|clean-all|clear|prune)
+            mode="delete"
+            ;;
+        *)
+            mode="update"
+            ;;
+    esac
+
+    local script="$SCRIPT_DIR/scripts/update-hosts-aliases.sh"
+
+    if [[ ! -f "$script" ]]; then
+        warn "未找到 hosts 同步脚本: $script"
+        return 0
+    fi
+
+    # 如果是update模式，等待容器完全启动
+    if [[ "$mode" == "update" ]]; then
+        info "等待容器启动完成..."
+        sleep 3
+
+        # 检查容器是否已经获得IP（最多等待30秒）
+        local max_wait=30
+        local waited=0
+        while [[ $waited -lt $max_wait ]]; do
+            local running_containers=$(docker ps -q 2>/dev/null | wc -l)
+            if [[ $running_containers -gt 0 ]]; then
+                # 检查是否所有运行中的容器都有IP
+                local containers_with_ip=$(docker ps -q 2>/dev/null | xargs -I {} docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' {} 2>/dev/null | grep -v '^$' | wc -l)
+                if [[ $containers_with_ip -eq $running_containers ]] || [[ $waited -ge 10 ]]; then
+                    break
+                fi
+            fi
+            sleep 2
+            waited=$((waited + 2))
+        done
+
+        info "同步 hosts 别名到 /etc/hosts 和 Windows hosts (mode=$mode)..."
+    else
+        info "清理 hosts 别名 (mode=$mode)..."
+    fi
+
+    if ! bash "$script" --mode "$mode"; then
+        warn "同步 hosts 失败，请检查权限或脚本输出"
+    fi
+}
+
+# 在容器停止/删除前，预先缓存容器信息用于清理hosts
+cache_containers_for_cleanup() {
+    local script="$SCRIPT_DIR/scripts/update-hosts-aliases.sh"
+    if [[ ! -f "$script" ]]; then
+        return 0
+    fi
+
+    # 强制更新缓存（即使不修改hosts文件）
+    local cache_file="/tmp/hg_dnmpr-hosts-entries"
+    local entries=()
+    local cids
+    cids=$(docker ps -q 2>/dev/null || true)
+
+    if [[ -n "$cids" ]]; then
+        while read -r cid; do
+            [[ -z "$cid" ]] && continue
+            local ip name aliases alias_list
+            ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$cid" 2>/dev/null | xargs)
+            if [[ -n "$ip" ]]; then
+                name=$(docker inspect -f '{{.Name}}' "$cid" 2>/dev/null | sed 's#^/##')
+                aliases=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{range $i,$a := .Aliases}}{{$a}} {{end}}{{end}}' "$cid" 2>/dev/null | xargs)
+                alias_list="$name $aliases"
+                alias_list=$(echo "$alias_list" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | xargs)
+                [[ -z "$alias_list" ]] && alias_list="$name"
+                entries+=("$ip $alias_list")
+            fi
+        done <<< "$cids"
+    fi
+
+    if [[ ${#entries[@]} -gt 0 ]]; then
+        printf "%s\n" "${entries[@]}" > "$cache_file"
+        info "已缓存 ${#entries[@]} 个容器信息用于清理 hosts"
+    fi
+}
+
 # 获取compose文件
+# 参数: environment [services...] [--silent]
+# --silent: 静默模式，不输出WSL检测信息
 get_compose_files() {
     local environment="$1"
-    local services=("${@:2}")
+    local services=()
+    local silent=false
+    local base_files=""
+    local wsl_file=""
+
+    # 解析参数，检查是否有 --silent 标志
+    shift
+    for arg in "$@"; do
+        if [[ "$arg" == "--silent" ]]; then
+            silent=true
+        else
+            services+=("$arg")
+        fi
+    done
 
     # 检查是否包含特殊组合
     for service in "${services[@]}"; do
@@ -147,18 +270,48 @@ get_compose_files() {
         esac
     done
 
+    # 检查是否包含MySQL服务
+    local has_mysql=false
+    for service in "${services[@]}"; do
+        case "$service" in
+            mysql|mysql_backup)
+                has_mysql=true
+                break
+                ;;
+        esac
+    done
+
+    # 如果是MySQL服务且是WSL环境，添加WSL配置文件
+    if [[ "$has_mysql" == "true" ]] && is_wsl_environment; then
+        if [[ -f "docker-compose.wsl.yaml" ]]; then
+            wsl_file="-f docker-compose.wsl.yaml"
+            # 非静默模式才输出日志
+            if [[ "$silent" == "false" ]]; then
+                # 将日志输出到stderr，避免污染函数返回值
+                info "检测到WSL环境，将使用WSL优化的MySQL配置" >&2
+            fi
+        fi
+    fi
+
     # 标准组合
     case "$environment" in
         dev|development)
-            echo "-f docker-compose.yaml -f docker-compose.dev.yaml"
+            base_files="-f docker-compose.yaml -f docker-compose.dev.yaml"
             ;;
         prod|production)
-            echo "-f docker-compose.yaml -f docker-compose.prod.yaml"
+            base_files="-f docker-compose.yaml -f docker-compose.prod.yaml"
             ;;
         *)
-            echo "-f docker-compose.yaml -f docker-compose.dev.yaml"
+            base_files="-f docker-compose.yaml -f docker-compose.dev.yaml"
             ;;
     esac
+
+    # 组合输出：基础文件 + WSL文件（如果存在）
+    if [[ -n "$wsl_file" ]]; then
+        echo "$base_files $wsl_file"
+    else
+        echo "$base_files"
+    fi
 }
 
 # 获取特殊组合的服务列表
@@ -350,6 +503,7 @@ execute_compose_command() {
     local options="$3"
     shift 3
     local services=("$@")
+    local trap_set=false
 
     # 在启动操作时，检查ELK证书（仅生产环境）
     if [[ "$operation" == "up" || "$operation" == "start" ]]; then
@@ -446,6 +600,8 @@ execute_compose_command() {
 
     # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
     local compose_cmd=$(get_docker_compose_cmd)
+
+    # hosts 同步将在 up/start 完成后执行，避免容器 IP 未就绪
 
     # 构建Docker命令
     local docker_cmd="$compose_cmd $compose_files"
@@ -607,7 +763,31 @@ execute_compose_command() {
     info "环境: $environment"
     info "服务: ${final_services[*]:-所有服务}"
 
+    # 为前台启动设置Ctrl+C清理trap
+    if [[ "$operation" == "up" || "$operation" == "start" ]]; then
+        if [[ ! "$options" =~ (-d|--detach) ]]; then
+            trap 'echo ""; info "检测到中断信号，正在清理 hosts..."; cache_containers_for_cleanup; sync_hosts_aliases "down"; trap - INT TERM; exit 130' INT TERM
+            trap_set=true
+        fi
+    fi
+
     eval "$docker_cmd"
+    local cmd_status=$?
+
+    if [[ "$trap_set" == "true" ]]; then
+        trap - INT TERM
+    fi
+
+    # 启动完成后同步hosts（等待容器获得IP）
+    if [[ "$operation" == "up" || "$operation" == "start" ]]; then
+        if [[ ${#final_services[@]} -gt 0 ]]; then
+            sync_hosts_aliases "$operation" "${final_services[*]}"
+        else
+            sync_hosts_aliases "$operation"
+        fi
+    fi
+
+    return $cmd_status
 }
 
 # 系统清理操作
@@ -943,7 +1123,9 @@ cleanup_logs
 # 处理系统级操作
 case "$OPERATION" in
     clear|delete|prune|clean-all|purge)
+        cache_containers_for_cleanup
         system_operations "$OPERATION"
+        sync_hosts_aliases "$OPERATION"
         exit 0
         ;;
     ps)
@@ -959,7 +1141,6 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
     case "$OPERATION" in
         up|start)
             log "启动所有已构建的服务..."
-            compose_files=$(get_compose_files "$ENVIRONMENT")
 
             # 获取所有已构建的镜像对应的服务
             available_services=()
@@ -982,6 +1163,19 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
 
             info "找到 ${#available_services[@]} 个已构建的服务: ${available_services[*]}"
 
+            # 将服务名映射为原始服务名（用于WSL检测）
+            mapped_services=()
+            for service in "${available_services[@]}"; do
+                case "$service" in
+                    mysql|mysql_backup)
+                        mapped_services+=("mysql")
+                        ;;
+                esac
+            done
+
+            # 获取compose文件（传递服务列表以检测是否需要WSL配置）
+            compose_files=$(get_compose_files "$ENVIRONMENT" "${mapped_services[@]}")
+
             # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
             compose_cmd=$(get_docker_compose_cmd)
 
@@ -994,7 +1188,17 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             # 添加已构建的服务名
             docker_cmd="$docker_cmd ${available_services[*]}"
 
+            # 为前台启动设置Ctrl+C清理trap
+            if [[ "$DETACH" != "true" ]]; then
+                trap 'echo ""; info "检测到中断信号，正在清理 hosts..."; cache_containers_for_cleanup; sync_hosts_aliases "down"; trap - INT TERM; exit 130' INT TERM
+            fi
+
             eval "$docker_cmd"
+            trap - INT TERM
+
+            # 启动完成后同步hosts
+            sync_hosts_aliases "$OPERATION"
+
             success "已构建的服务启动完成"
             ;;
         stop)
@@ -1002,8 +1206,18 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
             compose_cmd=$(get_docker_compose_cmd)
 
-            # 停止主要服务
-            compose_files=$(get_compose_files "$ENVIRONMENT")
+            # 检查是否有MySQL服务在运行，以确定是否需要WSL配置
+            has_mysql_running=false
+            if docker ps --format "{{.Names}}" | grep -q "^mysql$" 2>/dev/null; then
+                has_mysql_running=true
+            fi
+
+            # 停止主要服务（如果MySQL在运行，会自动添加WSL配置）
+            if [[ "$has_mysql_running" == "true" ]]; then
+                compose_files=$(get_compose_files "$ENVIRONMENT" "mysql" --silent)
+            else
+                compose_files=$(get_compose_files "$ENVIRONMENT" --silent)
+            fi
             $compose_cmd $compose_files stop
 
             # 停止ELK服务（如果存在且正在运行）
@@ -1015,24 +1229,39 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                 fi
             fi
 
-            # 停止SGR服务（如果存在且正在运行）
             if [[ -f "docker-compose-spug+gitea+rap2.yaml" ]]; then
                 sgr_containers=$(docker ps --filter "label=com.docker.compose.project=hg_dnmpr" --format "{{.Names}}" | grep -E "spug|gitea|rap2" 2>/dev/null || echo "")
+
                 if [[ -n "$sgr_containers" ]]; then
                     info "停止SGR服务..."
                     $compose_cmd -f docker-compose-spug+gitea+rap2.yaml stop
                 fi
             fi
 
+            cache_containers_for_cleanup
+            sync_hosts_aliases "$OPERATION"
             success "所有服务已停止"
             ;;
+
         down)
             log "停止并卸载所有服务..."
             # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
             compose_cmd=$(get_docker_compose_cmd)
 
-            # 停止并删除主要服务
-            compose_files=$(get_compose_files "$ENVIRONMENT")
+            # 检查是否有MySQL服务在运行，以确定是否需要WSL配置
+            has_mysql_running=false
+            if docker ps -a --format "{{.Names}}" | grep -q "^mysql$" 2>/dev/null; then
+                has_mysql_running=true
+            fi
+
+            if [[ "$has_mysql_running" == "true" ]]; then
+                compose_files=$(get_compose_files "$ENVIRONMENT" "mysql" --silent)
+            else
+                compose_files=$(get_compose_files "$ENVIRONMENT" --silent)
+            fi
+
+            cache_containers_for_cleanup
+            sync_hosts_aliases "$OPERATION"
             $compose_cmd $compose_files down
 
             # 停止并删除ELK服务（如果存在）
@@ -1078,7 +1307,18 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             # 获取 Docker Compose 命令（兼容 docker compose 和 docker-compose）
             compose_cmd=$(get_docker_compose_cmd)
 
+            # 检查是否有MySQL服务在运行，以确定是否需要WSL配置
+            has_mysql_running=false
+            if docker ps --format "{{.Names}}" | grep -q "^mysql$" 2>/dev/null; then
+                has_mysql_running=true
+            fi
+
+            # 获取compose文件（如果MySQL在运行，会自动添加WSL配置）
+            if [[ "$has_mysql_running" == "true" ]]; then
+                compose_files=$(get_compose_files "$ENVIRONMENT" "mysql")
+            else
             compose_files=$(get_compose_files "$ENVIRONMENT")
+            fi
 
             # 获取所有运行中的容器名称（包括主服务和ELK服务）
             running_containers=$($compose_cmd $compose_files ps --format "{{.Name}}" 2>/dev/null || echo "")
@@ -1152,6 +1392,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                         fi
                     fi
 
+                    sync_hosts_aliases "$OPERATION"
                     success "所有服务重启完成"
                 else
                     # 如果只有Web服务器或只有其他服务，重启指定的服务
@@ -1178,7 +1419,8 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                 if [[ ${#elk_services[@]} -gt 0 ]]; then
                     info "重启ELK服务 (${elk_services[*]})"
                     if [[ -f "docker-compose-ELK.yaml" ]]; then
-                        $compose_cmd -f docker-compose-ELK.yaml restart ${elk_services[*]}
+                        $compose_cmd -f "docker-compose-ELK.yaml" restart ${elk_services[*]}
+                        sync_hosts_aliases "$OPERATION"
                         success "ELK服务重启完成"
                     else
                         warn "未找到 docker-compose-ELK.yaml 文件，跳过ELK服务重启"
@@ -1186,6 +1428,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                 else
                     # 正常重启
                 $compose_cmd $compose_files restart
+                sync_hosts_aliases "$OPERATION"
                 success "所有服务重启完成"
                 fi
             fi
@@ -1196,6 +1439,12 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
     esac
 else
     # 处理指定服务的操作
+    case "$OPERATION" in
+        stop|down|delete|purge|clean-all|clear|prune)
+            cache_containers_for_cleanup
+            sync_hosts_aliases "$OPERATION"
+            ;;
+    esac
     execute_compose_command "$ENVIRONMENT" "$OPERATION" "$OPTIONS" "${SERVICES[@]}"
     success "操作完成"
 fi

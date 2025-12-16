@@ -12,6 +12,7 @@ x-default-common: &default-common
         - ./config/env/database.env
         - ./config/env/redis.env
     dns:
+        - 127.0.0.11 # Docker 内置 DNS，优先使用
         - ${DNS_PRIMARY:-223.5.5.5}
         - ${DNS_SECONDARY:-8.8.8.8}
     # 日志配置优化
@@ -125,6 +126,9 @@ services:
             # 日志目录 (专用卷)
             - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
 
+            # PHP扩展安装日志目录
+            - ./logs/php-extensions:/var/log/php-extensions:rw,Z
+
             # 虚拟主机配置
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
 
@@ -208,6 +212,9 @@ services:
             # 日志目录 (专用卷)
             - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
 
+            # PHP扩展安装日志目录
+            - ./logs/php-extensions:/var/log/php-extensions:rw,Z
+
             # 虚拟主机配置
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
 
@@ -285,6 +292,7 @@ services:
         volumes:
             - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
             - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
+            - ./logs/php-extensions:/var/log/php-extensions:rw,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP83_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
             - php_sessions:/tmp/php_sessions:rw
@@ -351,6 +359,7 @@ services:
         volumes:
             - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
             - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
+            - ./logs/php-extensions:/var/log/php-extensions:rw,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP82_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
             - php_sessions:/tmp/php_sessions:rw
@@ -410,6 +419,7 @@ services:
         volumes:
             - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
             - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
+            - ./logs/php-extensions:/var/log/php-extensions:rw,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP81_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
             - php_sessions:/tmp/php_sessions:rw
@@ -464,6 +474,7 @@ services:
         volumes:
             - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
             - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
+            - ./logs/php-extensions:/var/log/php-extensions:rw,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP80_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
             - php_sessions:/tmp/php_sessions:rw
@@ -518,6 +529,7 @@ services:
         volumes:
             - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
             - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
+            - ./logs/php-extensions:/var/log/php-extensions:rw,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP74_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
             - php_sessions:/tmp/php_sessions:rw
@@ -572,6 +584,7 @@ services:
         volumes:
             - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
             - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
+            - ./logs/php-extensions:/var/log/php-extensions:rw,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP72_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
             - php_sessions:/tmp/php_sessions:rw

@@ -1,295 +1,299 @@
-x-healthcheck:
-  &default-healthcheck
-  interval: 30s
-  timeout: 10s
-  retries: 3
-  start_period: 30s
+x-healthcheck: &default-healthcheck
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 30s
 
-x-common-variables:
-  &default-common
-  restart: unless-stopped  # 更稳定的重启策略
-  env_file:
-    - ./config/env/base.env
-    - ./config/env/web.env
-    - ./config/env/php.env
-    - ./config/env/database.env
-    - ./config/env/redis.env
-  dns:
-    - ${DNS_PRIMARY:-223.5.5.5}
-    - ${DNS_SECONDARY:-114.114.114.114}
+x-common-variables: &default-common
+    restart: unless-stopped # 更稳定的重启策略
+    env_file:
+        - ./config/env/base.env
+        - ./config/env/web.env
+        - ./config/env/php.env
+        - ./config/env/database.env
+        - ./config/env/redis.env
+    dns:
+        - ${DNS_PRIMARY:-223.5.5.5}
+        - ${DNS_SECONDARY:-114.114.114.114}
 
 services:
+    ################  valkey - redis衍生版 ########################
+    valkey-server:
+        <<: *default-common
+        container_name: valkey
+        build:
+            context: ./
+            dockerfile: ./build/valkey/Dockerfile
+            args:
+                ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                VALKEY_VERSION: ${VALKEY_VERSION}
+                HTTP_PROXY: ${HTTP_PROXY}
+                HTTPS_PROXY: ${HTTPS_PROXY}
+                NO_PROXY: ${NO_PROXY}
+            network: host # 使用主机网络解决DNS问题
+        ports:
+            - "${REDIS_HOST_PORT}:6379"
+        environment:
+            SET_CONTAINER_TIMEZONE: "true"
+            CONTAINER_TIMEZONE: ${TZ}
+        volumes:
+            - ${REDIS_CONF_FILE}:/etc/redis.conf:ro
+            - ${REDIS_LOG_DIR}:/var/log/redis/:rw
+        entrypoint: ["valkey-server", "/etc/redis.conf"]
+        deploy:
+            resources:
+                limits:
+                    cpus: ${REDIS_LIMITS_CPU}
+                    memory: ${REDIS_LIMITS_MEMORY}
+                reservations:
+                    memory: ${REDIS_RESERVATIONS_MEMORY}
+        restart: unless-stopped # 或 always
+        networks:
+            default:
+                aliases:
+                    - redis # 添加redis别名，支持使用redis或valkey作为服务名
+                    - valkey
+        # sysctls:
+        #   - net.core.somaxconn=1024
 
-################  valkey - redis衍生版 ########################
-  valkey-server:
-    << : *default-common
-    container_name: valkey
-    build:
-      context: ./
-      dockerfile: ./build/valkey/Dockerfile
-      args:
-        ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
-        CHANGE_SOURCE: ${CHANGE_SOURCE}
-        VALKEY_VERSION: ${VALKEY_VERSION}
-        HTTP_PROXY: ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        NO_PROXY: ${NO_PROXY}
-      network: host  # 使用主机网络解决DNS问题
-    ports:
-      - "${REDIS_HOST_PORT}:6379"
-    environment:
-      SET_CONTAINER_TIMEZONE: "true"
-      CONTAINER_TIMEZONE: ${TZ}
-    volumes:
-      - ${REDIS_CONF_FILE}:/etc/redis.conf:ro
-      - ${REDIS_LOG_DIR}:/var/log/redis/:rw
-    entrypoint: ["valkey-server", "/etc/redis.conf"]
-    deploy:
-     resources:
-        limits:
-           cpus: ${REDIS_LIMITS_CPU}
-           memory: ${REDIS_LIMITS_MEMORY}
-        reservations:
-           memory: ${REDIS_RESERVATIONS_MEMORY}
-    restart: unless-stopped  # 或 always
-    networks:
-      default:
-        aliases:
-          - redis  # 添加redis别名，支持使用redis或valkey作为服务名
-          - valkey
-    # sysctls:
-    #   - net.core.somaxconn=1024
+    ################  redis ########################
+    redis-server:
+        <<: *default-common
+        container_name: redis
+        build:
+            context: ./
+            dockerfile: ./build/redis/Dockerfile
+            args:
+                ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                REDIS_VERSION: ${REDIS_VERSION}
+                HTTP_PROXY: ${HTTP_PROXY}
+                HTTPS_PROXY: ${HTTPS_PROXY}
+                NO_PROXY: ${NO_PROXY}
+            network: host # 使用主机网络解决DNS问题
+        ports:
+            - "${REDIS_HOST_PORT:-6379}:6379"
+        environment:
+            SET_CONTAINER_TIMEZONE: "true"
+            CONTAINER_TIMEZONE: ${TZ:-Asia/Shanghai}
+        volumes:
+            - ${REDIS_CONF_FILE:-./conf/redis.conf}:/etc/redis.conf:ro
+            - ${REDIS_LOG_DIR:-./logs/redis}:/var/log/redis/:rw
+        entrypoint: ["redis-server", "/etc/redis.conf"]
+        deploy:
+            resources:
+                limits:
+                    cpus: ${REDIS_LIMITS_CPU:-0.5}
+                    memory: ${REDIS_LIMITS_MEMORY:-512M}
+                reservations:
+                    memory: ${REDIS_RESERVATIONS_MEMORY:-256M}
+        healthcheck:
+            <<: *default-healthcheck
+            test: ["CMD", "redis-cli", "ping"]
+        networks:
+            - default
+        # sysctls:
+        #   - net.core.somaxconn=1024
 
-################  redis ########################
-  redis-server:
-    << : *default-common
-    container_name: redis
-    build:
-      context: ./
-      dockerfile: ./build/redis/Dockerfile
-      args:
-        ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
-        CHANGE_SOURCE: ${CHANGE_SOURCE}
-        REDIS_VERSION: ${REDIS_VERSION}
-        HTTP_PROXY: ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        NO_PROXY: ${NO_PROXY}
-      network: host  # 使用主机网络解决DNS问题
-    ports:
-      - "${REDIS_HOST_PORT:-6379}:6379"
-    environment:
-      SET_CONTAINER_TIMEZONE: "true"
-      CONTAINER_TIMEZONE: ${TZ:-Asia/Shanghai}
-    volumes:
-      - ${REDIS_CONF_FILE:-./conf/redis.conf}:/etc/redis.conf:ro
-      - ${REDIS_LOG_DIR:-./logs/redis}:/var/log/redis/:rw
-    entrypoint: ["redis-server", "/etc/redis.conf"]
-    deploy:
-      resources:
-        limits:
-          cpus: ${REDIS_LIMITS_CPU:-0.5}
-          memory: ${REDIS_LIMITS_MEMORY:-512M}
-        reservations:
-          memory: ${REDIS_RESERVATIONS_MEMORY:-256M}
-    healthcheck:
-      <<: *default-healthcheck
-      test: ["CMD", "redis-cli", "ping"]
-    networks:
-      - default
-    # sysctls:
-    #   - net.core.somaxconn=1024
+    ################  MySQL ########################
+    # 采用官方二进制安装包安装，根据需要选择安装指定版本的mysql;
+    # 可有效避免docker仓库通过apt直接安装,因网络问题key无法下载问题。
+    # 缺点：采用该方式，会导致images文件大小会偏大一点
+    #
+    mysql-server:
+        <<: *default-common
+        container_name: mysql
+        # security_opt: # docker安全验证
+        #   - seccomp:unconfined
+        build:
+            context: ./
+            dockerfile: ./build/mysql/Dockerfile
+            args:
+                MYSQL_VER: ${MYSQL_VERSION}
+                GOSU_VERSION: ${GOSU_VERSION}
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                HTTP_PROXY: ${HTTP_PROXY}
+                HTTPS_PROXY: ${HTTPS_PROXY}
+                NO_PROXY: ${NO_PROXY}
+            network: host # 使用主机网络解决DNS问题
+        healthcheck:
+            test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 60s # 增加启动时间，等待初始化完成
+        environment:
+            MYSQL_DATABASE: ${MYSQL_DATABASE}
+            MYSQL_USER: ${MYSQL_USER}
+            MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+            MYSQL_ROOT_HOST: ${MYSQL_ROOT_HOST}
+            MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+            MYSQL_ALLOW_EMPTY_PASSWORD: "no"
+            MYSQL_RANDOM_ROOT_PASSWORD: "no"
+            # 启用调试模式
+            DEBUG: "true"
+            TZ: ${TZ}
+        volumes:
+            - mysql_data:/var/lib/mysql:rw # 使用 Docker named volume 进行数据持久化
+            - ${MYSQL_CONF_FILE}:/etc/mysql/my.cnf:ro
+            - ./conf/mysql/conf.d/docker.cnf:/etc/mysql/conf.d/docker.cnf:ro,Z
+            - ${MYSQL_ENV_CONFIG_FILE}:/etc/mysql/conf.d/mysql-env.cnf:ro,Z # 环境特定配置
+            - ${MYSQL_LOG_DIR}:/var/log/mysql:rw
+            - ./build/mysql/init-mysql-user.sh:/docker-entrypoint-initdb.d/init-mysql-user.sh:ro
+        ports:
+            - "${MYSQL_HOST_PORT:-3306}:3306" # 使用不同的端口，默认3306
+        networks:
+            default:
+                aliases:
+                    - mysql # 添加mysql别名，支持使用mysql作为服务名
+        deploy:
+            resources:
+                limits:
+                    cpus: ${MYSQL_LIMITS_CPU}
+                    memory: ${MYSQL_LIMITS_MEMORY}
+                reservations:
+                    memory: ${MYSQL_RESERVATIONS_MEMORY}
+        restart: unless-stopped # 或 always
+        platform: linux/x86_64
 
-################  MySQL ########################
+    ################  MySQL 备份服务 ########################
+    mysql-backup:
+        <<: *default-common
+        container_name: mysql_backup
+        image: ${MYSQL_BACKUP_IMAGE} # 动态引用MySQL镜像，根据构建版本自动切换
+        # 注意：不使用depends_on，避免强制启动两个MySQL服务
+        # 备份脚本会自动检测可用的MySQL服务
+        environment:
+            MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+            MYSQL_ENABLED: "true"
+            TZ: ${TZ}
+        volumes:
+            - ${MYSQL_BACKUP_DIR}:/backup:rw
+            - ./scripts/mysql-backup.sh:/usr/local/bin/mysql-backup.sh:ro
+        command: >
+            sh -c "while true; do
+              echo 'Starting MySQL backup at $(date)';
 
-# 采用官方二进制安装包安装，根据需要选择安装指定版本的mysql;
-# 可有效避免docker仓库通过apt直接安装,因网络问题key无法下载问题。
-# 缺点：采用该方式，会导致images文件大小会偏大一点
-#
-  mysql-server:
-    << : *default-common
-    container_name: mysql
-    # security_opt: # docker安全验证
-    #   - seccomp:unconfined
-    build:
-      context: ./
-      dockerfile: ./build/mysql/Dockerfile
-      args:
-        MYSQL_VER: ${MYSQL_VERSION}
-        GOSU_VERSION: ${GOSU_VERSION}
-        CHANGE_SOURCE: ${CHANGE_SOURCE}
-        HTTP_PROXY: ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        NO_PROXY: ${NO_PROXY}
-      network: host  # 使用主机网络解决DNS问题
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s  # 增加启动时间，等待初始化完成
-    environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      MYSQL_ROOT_HOST: ${MYSQL_ROOT_HOST}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_ALLOW_EMPTY_PASSWORD: "no"
-      MYSQL_RANDOM_ROOT_PASSWORD: "no" 
-      # 启用调试模式
-      DEBUG: "true"
-      TZ: ${TZ}
-    volumes:
-      - ${MYSQL_DATA_DIR}:/var/lib/mysql:rw  # 使用环境变量映射数据目录
-      - ${MYSQL_CONF_FILE}:/etc/mysql/my.cnf:ro
-      - ./conf/mysql/conf.d/docker.cnf:/etc/mysql/conf.d/docker.cnf:ro,Z
-      - ${MYSQL_ENV_CONFIG_FILE}:/etc/mysql/conf.d/mysql-env.cnf:ro,Z  # 环境特定配置
-      - ${MYSQL_LOG_DIR}:/var/log/mysql:rw
-      - ./build/mysql/init-mysql-user.sh:/docker-entrypoint-initdb.d/init-mysql-user.sh:ro
-    ports:
-      - "${MYSQL_HOST_PORT:-3306}:3306"  # 使用不同的端口，默认3306
-    networks:
-      default:
-        aliases:
-          - mysql  # 添加mysql别名，支持使用mysql或mysql-server作为服务名
-          - mysql-server
-    deploy:
-     resources:
-        limits:
-           cpus: ${MYSQL_LIMITS_CPU}
-           memory: ${MYSQL_LIMITS_MEMORY}
-        reservations:
-           memory: ${MYSQL_RESERVATIONS_MEMORY}
-    restart: unless-stopped  # 或 always
-    platform: linux/x86_64
+              # 备份 mysql-server（如果可用）
+              if mysqladmin ping -h mysql-server -u root -p$$MYSQL_ROOT_PASSWORD --silent 2>/dev/null; then
+                mysqldump -h mysql-server -u root -p$$MYSQL_ROOT_PASSWORD
+                  --single-transaction --routines --triggers --all-databases
+                  > /backup/mysql_backup_$$(date +%Y%m%d_%H%M%S).sql &&
+                echo 'MySQL backup completed successfully';
+              else
+                echo 'MySQL server not available, skipping backup';
+              fi
 
-################  MySQL 备份服务 ########################
-  mysql-backup:
-    << : *default-common
-    container_name: mysql_backup
-    image: ${MYSQL_BACKUP_IMAGE}  # 动态引用MySQL镜像，根据构建版本自动切换
-    # 注意：不使用depends_on，避免强制启动两个MySQL服务
-    # 备份脚本会自动检测可用的MySQL服务
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_ENABLED: "true"
-      TZ: ${TZ}
-    volumes:
-      - ${MYSQL_BACKUP_DIR}:/backup:rw
-      - ./scripts/mysql-backup.sh:/usr/local/bin/mysql-backup.sh:ro
-    command: >
-      sh -c "while true; do
-        echo 'Starting MySQL backup at $(date)';
+              # 清理7天前的备份文件
+              find /backup -name '*.sql' -mtime +7 -delete &&
+              echo 'Old backup files cleaned up';
 
-        # 备份 mysql-server（如果可用）
-        if mysqladmin ping -h mysql-server -u root -p$$MYSQL_ROOT_PASSWORD --silent 2>/dev/null; then
-          mysqldump -h mysql-server -u root -p$$MYSQL_ROOT_PASSWORD 
-            --single-transaction --routines --triggers --all-databases 
-            > /backup/mysql_backup_$$(date +%Y%m%d_%H%M%S).sql && 
-          echo 'MySQL backup completed successfully';
-        else
-          echo 'MySQL server not available, skipping backup';
-        fi
-        
-        # 清理7天前的备份文件
-        find /backup -name '*.sql' -mtime +7 -delete && 
-        echo 'Old backup files cleaned up';
-        
-        echo 'Next backup scheduled for tomorrow at 2:00 AM';
-        sleep 86400;  # 每24小时执行一次
-      done"
-    restart: unless-stopped
-    networks:
-      - default
-    deploy:
-      resources:
-        limits:
-           cpus: ${MYSQL_LIMITS_CPU}
-           memory: ${MYSQL_LIMITS_MEMORY}
-        reservations:
-           memory: ${MYSQL_RESERVATIONS_MEMORY}
+              echo 'Next backup scheduled for tomorrow at 2:00 AM';
+              sleep 86400;  # 每24小时执行一次
+            done"
+        restart: unless-stopped
+        networks:
+            - default
+        deploy:
+            resources:
+                limits:
+                    cpus: ${MYSQL_LIMITS_CPU}
+                    memory: ${MYSQL_LIMITS_MEMORY}
+                reservations:
+                    memory: ${MYSQL_RESERVATIONS_MEMORY}
 
-################   mongo ########################
-  mongo-server:
-    << : *default-common
-    container_name: mongo
-    build:
-      context: ./
-      dockerfile: ./build/mongo/Dockerfile
-      args:
-        MONGO_VERSION: ${MONGO_VERSION}
-        CHANGE_SOURCE: ${CHANGE_SOURCE}
-        HTTP_PROXY: ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        NO_PROXY: ${NO_PROXY}
-      network: host  # 使用主机网络解决DNS问题
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
-    ports:
-      - "${MONGO_HOST_PORT}:27017"
-    volumes:
-      - ${MONGO_DATA_DB_DIR}:/data/db:rw
-    deploy:
-      resources:
-        limits:
-           cpus: ${MONGO_LIMITS_CPU}
-           memory: ${MONGO_LIMITS_MEMORY}
-        reservations:
-           memory: ${MONGO_RESERVATIONS_MEMORY}
-    networks:
-      - default
-    command:
-      --auth
+    ################   mongo ########################
+    mongo-server:
+        <<: *default-common
+        container_name: mongo
+        build:
+            context: ./
+            dockerfile: ./build/mongo/Dockerfile
+            args:
+                MONGO_VERSION: ${MONGO_VERSION}
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                HTTP_PROXY: ${HTTP_PROXY}
+                HTTPS_PROXY: ${HTTPS_PROXY}
+                NO_PROXY: ${NO_PROXY}
+            network: host # 使用主机网络解决DNS问题
+        environment:
+            MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+            MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+        ports:
+            - "${MONGO_HOST_PORT}:27017"
+        volumes:
+            - mongo_data:/data/db:rw # 使用 Docker named volume 进行数据持久化
+        deploy:
+            resources:
+                limits:
+                    cpus: ${MONGO_LIMITS_CPU}
+                    memory: ${MONGO_LIMITS_MEMORY}
+                reservations:
+                    memory: ${MONGO_RESERVATIONS_MEMORY}
+        networks:
+            - default
+        command: --auth
 
-#################   postgres  ########################
-  postgres-server:
-    << : *default-common
-    container_name: postgres
-    build:
-      context: ./
-      dockerfile: ./build/postgres/Dockerfile
-      args:
-        PG_VERSION: ${PG_VERSION}
-        CHANGE_SOURCE: ${CHANGE_SOURCE}
-        HTTP_PROXY: ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        NO_PROXY: ${NO_PROXY}
-      network: host  # 使用主机网络解决DNS问题
-    ports:
-      - "${PG_PORT}:5432"
-    environment:
-      # PG_USER: ${PG_USER}
-      # PG_PASSWORD: ${PG_PASSWORD}
-      POSTGRES_USER: ${PG_USER}
-      POSTGRES_PASSWORD: ${PG_PASSWORD}
-      ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
-    volumes:
-      - ${POSTGRES_DATA_DB_DIR}:/var/lib/postgresql/data # persist postgres data to ~/postgres/data/ on the host
-    deploy:
-      resources:
-        limits:
-           cpus: ${PG_LIMITS_CPU}
-           memory: ${PG_LIMITS_MEMORY}
-        reservations:
-           memory: ${PG_RESERVATIONS_MEMORY}
-    networks:
-      - default
-    restart: unless-stopped
+    #################   postgres  ########################
+    postgres-server:
+        <<: *default-common
+        container_name: postgres
+        build:
+            context: ./
+            dockerfile: ./build/postgres/Dockerfile
+            args:
+                PG_VERSION: ${PG_VERSION}
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                HTTP_PROXY: ${HTTP_PROXY}
+                HTTPS_PROXY: ${HTTPS_PROXY}
+                NO_PROXY: ${NO_PROXY}
+            network: host # 使用主机网络解决DNS问题
+        ports:
+            - "${PG_PORT}:5432"
+        environment:
+            # PG_USER: ${PG_USER}
+            # PG_PASSWORD: ${PG_PASSWORD}
+            POSTGRES_USER: ${PG_USER}
+            POSTGRES_PASSWORD: ${PG_PASSWORD}
+            ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
+        volumes:
+            - postgres_data:/var/lib/postgresql/data # 使用 Docker named volume 进行数据持久化
+        deploy:
+            resources:
+                limits:
+                    cpus: ${PG_LIMITS_CPU}
+                    memory: ${PG_LIMITS_MEMORY}
+                reservations:
+                    memory: ${PG_RESERVATIONS_MEMORY}
+        networks:
+            - default
+        restart: unless-stopped
 
-  pgadmin-server:
-    container_name: pgadmin
-    image: dpage/pgadmin4
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-pgadmin4@pgadmin.org}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-    volumes:
-      - pgadmin:/var/lib/pgadmin
-    ports:
-      - "${PGADMIN_PORT:-5050}:80"
-    networks:
-      - default
-    restart: unless-stopped
+    pgadmin-server:
+        container_name: pgadmin
+        image: dpage/pgadmin4
+        environment:
+            PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-pgadmin4@pgadmin.org}
+            PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+            PGADMIN_CONFIG_SERVER_MODE: "False"
+        volumes:
+            - pgadmin:/var/lib/pgadmin
+        ports:
+            - "${PGADMIN_PORT:-5050}:80"
+        networks:
+            - default
+        restart: unless-stopped
 
 volumes:
-  pgadmin:
+    # MySQL数据卷（已在mysql-server服务中使用）
+    mysql_data:
+        driver: local
+    # MongoDB数据卷
+    mongo_data:
+        driver: local
+    # PostgreSQL数据卷
+    postgres_data:
+        driver: local
+    # pgAdmin数据卷
+    pgadmin:

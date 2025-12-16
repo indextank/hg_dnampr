@@ -26,6 +26,8 @@ RUN set -eux; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y curl wget
 
 COPY ./src/elk/elasticsearch ${TMP_DIR}
+# 复制下载辅助脚本
+COPY ./scripts/download-helper.sh /tmp/download-helper.sh
 WORKDIR ${TMP_DIR}
 
 # `tini` is a tiny but valid init for containers. This is used to cleanly
@@ -60,9 +62,12 @@ RUN set -eux; \
     \
     chmod +x /bin/tini; \
     \
-	if [ ! -f "elasticsearch-${ELK_VERSION}-linux-$(arch).tar.gz" ]; then \
-        wget --limit-rate=100M --tries=6 -c --no-check-certificate "https://artifacts-no-kpi.elastic.co/downloads/elasticsearch/elasticsearch-${ELK_VERSION}-linux-$(arch).tar.gz"; \
-	fi
+	# 使用 bash 加载下载辅助脚本并执行下载
+	bash -c '. /tmp/download-helper.sh && \
+	download_if_missing "https://artifacts-no-kpi.elastic.co/downloads/elasticsearch/elasticsearch-${ELK_VERSION}-linux-$(arch).tar.gz" "elasticsearch-${ELK_VERSION}-linux-$(arch).tar.gz" || { \
+		echo "下载失败"; \
+		exit 1; \
+	}'
 
 WORKDIR /usr/share/elasticsearch
 

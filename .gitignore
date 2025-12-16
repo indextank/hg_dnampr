@@ -222,3 +222,4 @@ experimental/
 playground/
 sandbox/
 .kilocode/*.json
+.zed/

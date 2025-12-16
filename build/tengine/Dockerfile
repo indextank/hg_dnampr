@@ -38,6 +38,8 @@ RUN set -eux; \
     fi;
 
 COPY ./src/nginx/ ${TMP_DIR}
+# 复制下载辅助脚本
+COPY ./scripts/download-helper.sh /tmp/download-helper.sh
 WORKDIR ${TMP_DIR}
 
 ENV CONFIG="\
@@ -109,14 +111,14 @@ RUN set -eux; \
             geoip-dev; \
     cd ${TMP_DIR}; \
     \
-    # 下载源码
-    if [ ! -f "tengine-$TENGINE_VERSION.tar.gz" ]; then \
-        curl -L "https://github.com/alibaba/tengine/archive/$TENGINE_VERSION.tar.gz" -o tengine-$TENGINE_VERSION.tar.gz; \
-    fi; \
-    \
-    if [ ! -f "headers-more-nginx-module-${HMNM_VERSION}.tar.gz" ]; then \
-        curl -L "https://github.com/openresty/headers-more-nginx-module/archive/v${HMNM_VERSION}.tar.gz" -o headers-more-nginx-module-${HMNM_VERSION}.tar.gz; \
-    fi; \
+    # 使用 bash 加载下载辅助脚本并执行下载
+    bash -c '. /tmp/download-helper.sh && \
+    parallel_download \
+        "tengine-$TENGINE_VERSION.tar.gz:https://github.com/alibaba/tengine/archive/$TENGINE_VERSION.tar.gz" \
+        "headers-more-nginx-module-${HMNM_VERSION}.tar.gz:https://github.com/openresty/headers-more-nginx-module/archive/v${HMNM_VERSION}.tar.gz" || { \
+        echo "下载失败"; \
+        exit 1; \
+    }'; \
     \
     # curl -L "https://github.com/alibaba/tengine/archive/$TENGINE_VERSION.tar.gz" -o tengine-$TENGINE_VERSION.tar.gz; \
     # mkdir -p /tmp/extensions; \

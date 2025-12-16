@@ -44,6 +44,8 @@ ENV VALKEY_DOWNLOAD_URL=https://github.com/valkey-io/valkey/archive/refs/tags/${
 # ENV VALKEY_DOWNLOAD_SHA=3355fbd5458d853ab201d2c046ffca9f078000587ccbe9a6c585110f146ad2c5
 
 COPY ./src/valkey/ ${TMP_DIR}
+# 复制下载辅助脚本
+COPY ./scripts/download-helper.sh /tmp/download-helper.sh
 WORKDIR ${TMP_DIR}
 
 RUN set -eux; \
@@ -68,9 +70,12 @@ RUN set -eux; \
 	# 		echo "$VALKEY_DOWNLOAD_SHA *valkey.tar.gz" | sha256sum -c -; \
 	cd ${TMP_DIR}; \
     \
-    if [ ! -f "valkey-${VALKEY_VERSION}.tar.gz" ]; then \
-        curl -L "$REDIS_DOWNLOAD_URL" -o valkey-${VALKEY_VERSION}.tar.gz; \
-    fi; \
+    # 使用 bash 加载下载辅助脚本并执行下载
+    bash -c '. /tmp/download-helper.sh && \
+    download_if_missing "$REDIS_DOWNLOAD_URL" "valkey-${VALKEY_VERSION}.tar.gz" || { \
+        echo "下载失败"; \
+        exit 1; \
+    }'; \
     \
 	mkdir -p /usr/src/valkey; \
 	# tar -xzf valkey.tar.gz -C /usr/src/valkey --strip-components=1; \

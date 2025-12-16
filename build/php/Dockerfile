@@ -1,4 +1,4 @@
-# 第一阶段：构建基础依赖
+# 第一阶段:构建基础依赖
 FROM debian:bookworm-slim AS base-builder
 
 # 构建参数定义
@@ -94,42 +94,22 @@ ARG LIBSODIUM_VERSION
 
 # 复制源码包
 COPY ./src/php/ ${TMP_DIR}/
+# 复制 OpenSSL（统一管理，从 src/openssl/ 目录）
+COPY ./src/openssl/openssl-${OPENSSL_VERSION}.tar.gz ${TMP_DIR}/
+# 复制下载辅助脚本
+COPY ./scripts/download-helper.sh /tmp/download-helper.sh
 
-# 下载所需的源码包（如果不存在）
-# RUN set -eux; \
-# 	cd "${TMP_DIR}"; \
-# 	if [ ! -f "openssl-${OPENSSL_VERSION}.tar.gz" ]; then \
-# 		curl -L "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" -o openssl-${OPENSSL_VERSION}.tar.gz; \
-# 	fi; \
-# 	if [ ! -f "curl-${CURL_VERSION}.tar.xz" ]; then \
-# 		curl -L "https://curl.se/download/curl-${CURL_VERSION}.tar.xz" -o curl-${CURL_VERSION}.tar.xz; \
-# 	fi; \
-# 	if [ ! -f "libwebp-${LIBWEBP_VERSION}.tar.gz" ]; then \
-# 		curl -L "https://github.com/webmproject/libwebp/archive/v${LIBWEBP_VERSION}.tar.gz" -o libwebp-${LIBWEBP_VERSION}.tar.gz; \
-# 	fi
 RUN set -eux; \
 	cd "${TMP_DIR}"; \
-	# 并行下载优化
-	download_if_missing() { \
-		local url="$1" filename="$2"; \
-		if [ ! -f "${filename}" ]; then \
-			echo "下载 ${filename}..."; \
-			curl -fsSL --retry 3 --retry-delay 5 -o "${filename}" "${url}" || { \
-				echo "下载 ${filename} 失败"; \
-				return 1; \
-			}; \
-		else \
-			echo "${filename} 已存在，跳过下载"; \
-		fi; \
-	}; \
-	\
-	# 并行下载 (网络优化)
-	{ \
-		download_if_missing "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" "openssl-${OPENSSL_VERSION}.tar.gz" & \
-		download_if_missing "https://curl.se/download/curl-${CURL_VERSION}.tar.xz" "curl-${CURL_VERSION}.tar.xz" & \
-		download_if_missing "https://github.com/webmproject/libwebp/archive/v${LIBWEBP_VERSION}.tar.gz" "libwebp-${LIBWEBP_VERSION}.tar.gz" & \
-		wait; \
-	} || { echo "下载失败"; exit 1; }
+	# 使用 bash 加载下载辅助脚本并执行下载
+	bash -c '. /tmp/download-helper.sh && \
+	parallel_download \
+		"openssl-${OPENSSL_VERSION}.tar.gz:https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" \
+		"curl-${CURL_VERSION}.tar.xz:https://curl.se/download/curl-${CURL_VERSION}.tar.xz" \
+		"libwebp-${LIBWEBP_VERSION}.tar.gz:https://github.com/webmproject/libwebp/archive/v${LIBWEBP_VERSION}.tar.gz" || { \
+		echo "下载失败"; \
+		exit 1; \
+	}'
 
 
 # 编译基础库
@@ -414,24 +394,31 @@ RUN set -eux; \
 
 # 编译安装PHP
 RUN set -eux; \
-	echo "构建环境变量: PHP_CFLAGS=${PHP_CFLAGS}, PHP_CPPFLAGS=${PHP_CPPFLAGS}, PHP_LDFLAGS=${PHP_LDFLAGS}"; \
+	# 创建构建日志文件
+	BUILD_LOG="/tmp/php-build.log"; \
+	touch "$BUILD_LOG"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
+	echo "PHP ${PHP_VERSION} 构建日志开始" | tee -a "$BUILD_LOG"; \
+	echo "构建时间: $(date)" | tee -a "$BUILD_LOG"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
+	echo "构建环境变量: PHP_CFLAGS=${PHP_CFLAGS}, PHP_CPPFLAGS=${PHP_CPPFLAGS}, PHP_LDFLAGS=${PHP_LDFLAGS}" | tee -a "$BUILD_LOG"; \
 	cd "${TMP_DIR}"; \
 	export CFLAGS="${PHP_CFLAGS}"; \
 	export CPPFLAGS="${PHP_CPPFLAGS}"; \
 	export LDFLAGS="${PHP_LDFLAGS}"; \
 	mkdir -p php; \
-	echo "解压PHP源码包"; \
-	tar -Jxf php-${PHP_VERSION}.tar.xz -C php --strip-components=1 || { echo "解压PHP源码失败"; exit 1; }; \
+	echo "解压PHP源码包" | tee -a "$BUILD_LOG"; \
+	tar -Jxf php-${PHP_VERSION}.tar.xz -C php --strip-components=1 2>&1 | tee -a "$BUILD_LOG" || { echo "解压PHP源码失败" | tee -a "$BUILD_LOG"; exit 1; }; \
 	touch "${TMP_DIR}/.docker-extracted"; \
 	cd php; \
 	\
 	# 获取PHP版本信息
-	echo "读取PHP版本信息"; \
-	[ -f "main/php_version.h" ] || { echo "PHP版本文件不存在"; ls -la main/; exit 1; }; \
+	echo "读取PHP版本信息" | tee -a "$BUILD_LOG"; \
+	[ -f "main/php_version.h" ] || { echo "PHP版本文件不存在" | tee -a "$BUILD_LOG"; ls -la main/ | tee -a "$BUILD_LOG"; exit 1; }; \
 	phpMajor="$(grep "#define PHP_MAJOR_VERSION " main/php_version.h | awk -F " " '{print $3}')"; \
 	phpMinor="$(grep "#define PHP_MINOR_VERSION " main/php_version.h | awk -F " " '{print $3}')"; \
 	phpVersionId=${phpMajor}.${phpMinor}; \
-	echo "检测到PHP版本: ${phpVersionId}"; \
+	echo "检测到PHP版本: ${phpVersionId}" | tee -a "$BUILD_LOG"; \
 	\
 	# 设置构建参数
 	gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
@@ -448,7 +435,9 @@ RUN set -eux; \
 	fi; \
 	\
 	# 配置并编译PHP
-	echo "配置PHP构建参数"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
+	echo "开始配置PHP构建参数" | tee -a "$BUILD_LOG"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
 	./configure \
 		--build="$gnuArch" \
 		--with-config-file-path="$PHP_INI_DIR" \
@@ -494,64 +483,112 @@ RUN set -eux; \
 		--disable-rpath \
 		--disable-cgi \
 		--disable-debug \
-		--disable-phpdbg || { echo "PHP配置失败"; cat config.log; exit 1; }; \
+		--disable-phpdbg 2>&1 | tee -a "$BUILD_LOG" || { echo "PHP配置失败" | tee -a "$BUILD_LOG"; cat config.log | tee -a "$BUILD_LOG"; exit 1; }; \
 	\
-	echo "编译PHP"; \
-	make -j "$(nproc)" || { echo "PHP编译失败"; exit 1; }; \
-	echo "安装PHP"; \
-	make install || { echo "PHP安装失败"; exit 1; }; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
+	echo "开始编译PHP" | tee -a "$BUILD_LOG"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
+	make -j "$(nproc)" 2>&1 | tee -a "$BUILD_LOG" || { echo "PHP编译失败" | tee -a "$BUILD_LOG"; exit 1; }; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
+	echo "开始安装PHP" | tee -a "$BUILD_LOG"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
+	make install 2>&1 | tee -a "$BUILD_LOG" || { echo "PHP安装失败" | tee -a "$BUILD_LOG"; exit 1; }; \
 	\
 	# 删除不必要的文件和优化
+	echo "清理构建文件..." | tee -a "$BUILD_LOG"; \
 	find -type f -name '*.a' -delete; \
 	find /usr/local -type f -perm '/0111' -exec sh -euxc 'strip --strip-all "$@" || :' -- '{}' +; \
 	make clean; \
 	\
 	# 复制PHP.ini文件示例
-	cp -v php.ini-* "$PHP_INI_DIR/"
+	echo "复制PHP配置文件..." | tee -a "$BUILD_LOG"; \
+	cp -v php.ini-* "$PHP_INI_DIR/" | tee -a "$BUILD_LOG"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
+	echo "PHP ${PHP_VERSION} 编译安装完成" | tee -a "$BUILD_LOG"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"
 
 # 安装扩展和Composer
 RUN set -eux; \
+	BUILD_LOG="/tmp/php-build.log"; \
 	cd "${TMP_DIR}"; \
-	echo "安装PHP扩展"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
+	echo "开始安装PHP扩展" | tee -a "$BUILD_LOG"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
 	chmod +x ext-debian.sh; \
-	bash ext-debian.sh | tee -a /tmp/ext-debian.log || echo "扩展安装可能有部分失败"; \
+	bash ext-debian.sh 2>&1 | tee -a "$BUILD_LOG" || echo "扩展安装可能有部分失败" | tee -a "$BUILD_LOG"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
+	echo "PHP扩展安装完成" | tee -a "$BUILD_LOG"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
 	\
-	echo "安装Composer"; \
-	# 使用官方推荐的安装方法，动态获取最新哈希值 \
-	EXPECTED_CHECKSUM="$(php -r 'copy("https://composer.github.io/installer.sig", "php://stdout");')"; \
-	php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" || { echo "下载Composer失败"; exit 1; }; \
-	ACTUAL_CHECKSUM="$(php -r 'echo hash_file("sha384", "composer-setup.php");')"; \
-	if [ "$EXPECTED_CHECKSUM" != "$ACTUAL_CHECKSUM" ]; then \
-		echo >&2 'ERROR: Invalid installer checksum'; \
-		rm composer-setup.php; \
+	# 安装Composer \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
+	echo "开始安装Composer" | tee -a "$BUILD_LOG"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
+	cd /tmp; \
+	COMPOSER_INSTALLED=false; \
+	\
+	# 尝试多个镜像源下载 composer.phar \
+	for MIRROR in \
+		"https://getcomposer.org/download/latest-stable/composer.phar" \
+		"https://mirrors.aliyun.com/composer/composer.phar" \
+		"https://mirrors.cloud.tencent.com/composer/composer.phar"; do \
+		echo "尝试从镜像下载: $MIRROR" | tee -a "$BUILD_LOG"; \
+		if curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 --retry-delay 5 \
+			-o composer.phar "$MIRROR" 2>&1 | tee -a "$BUILD_LOG"; then \
+			\
+			# 验证下载的文件是否有效（此时PHP已安装） \
+			if [ -s composer.phar ] && php composer.phar --version 2>&1 | grep -i composer | tee -a "$BUILD_LOG"; then \
+				echo "✓ Composer 下载成功: $MIRROR" | tee -a "$BUILD_LOG"; \
+				COMPOSER_INSTALLED=true; \
+				break; \
+			else \
+				echo "✗ 下载的文件无效，尝试下一个镜像..." | tee -a "$BUILD_LOG"; \
+				rm -f composer.phar; \
+			fi; \
+		else \
+			echo "✗ 下载失败，尝试下一个镜像..." | tee -a "$BUILD_LOG"; \
+			rm -f composer.phar; \
+		fi; \
+	done; \
+	\
+	# 最终检查 \
+	if [ "$COMPOSER_INSTALLED" = false ] || [ ! -f composer.phar ]; then \
+		echo "错误: Composer 安装失败" | tee -a "$BUILD_LOG"; \
 		exit 1; \
 	fi; \
-	php composer-setup.php --quiet; \
-	RESULT=$?; \
-	rm composer-setup.php; \
-	if [ $RESULT -ne 0 ]; then \
-		echo >&2 'ERROR: Composer installation failed'; \
-		exit 1; \
-	fi; \
-	if [ -f "composer.phar" ]; then \
-		mv composer.phar /usr/local/bin/composer; \
-		chmod +x /usr/local/bin/composer; \
-		echo "Composer安装成功"; \
-	else \
-		echo "ERROR: Composer安装失败，未生成composer.phar文件"; \
-		exit 1; \
-	fi; \
+	\
+	# 安装到系统路径 \
+	mv composer.phar /usr/local/bin/composer; \
+	chmod +x /usr/local/bin/composer; \
+	composer --version 2>&1 | tee -a "$BUILD_LOG"; \
+	echo "✓ Composer 安装完成" | tee -a "$BUILD_LOG"; \
 	\
 	# 更新PECL通道
+	echo "更新PECL通道..." | tee -a "$BUILD_LOG"; \
 	if [ -f "/usr/local/bin/pecl" ]; then \
-		pecl channel-update pecl.php.net || echo "PECL通道更新失败"; \
-		pecl update-channels || echo "PECL通道刷新失败"; \
+		pecl channel-update pecl.php.net 2>&1 | tee -a "$BUILD_LOG" || echo "PECL通道更新失败" | tee -a "$BUILD_LOG"; \
+		pecl update-channels 2>&1 | tee -a "$BUILD_LOG" || echo "PECL通道刷新失败" | tee -a "$BUILD_LOG"; \
 	fi; \
 	\
 	# 清理缓存
+	echo "清理构建缓存..." | tee -a "$BUILD_LOG"; \
 	rm -rf /tmp/pear ~/.pearrc; \
-	apt-get autoremove -y; \
-	apt-get autoclean
+	apt-get autoremove -y 2>&1 | tee -a "$BUILD_LOG"; \
+	apt-get autoclean 2>&1 | tee -a "$BUILD_LOG"; \
+	\
+	# 确保构建日志文件权限正确
+	chmod 644 "$BUILD_LOG"; \
+	\
+	# 确保 ImageMagick 目录存在（如果 imagick 扩展未安装，创建空目录避免 COPY 失败）
+	if [ ! -d "/usr/local/imagemagick" ]; then \
+		mkdir -p /usr/local/imagemagick; \
+		touch /usr/local/imagemagick/.placeholder; \
+	fi; \
+	\
+	echo "=========================================" | tee -a "$BUILD_LOG"; \
+	echo "PHP ${PHP_VERSION} 构建完成" | tee -a "$BUILD_LOG"; \
+	echo "完成时间: $(date)" | tee -a "$BUILD_LOG"; \
+	echo "=========================================" | tee -a "$BUILD_LOG"
 
 # ==========================================
 # 最终阶段：运行时镜像 (安全优化)
@@ -623,6 +660,8 @@ RUN set -eux; \
 		libfreetype6 \
 		libvpx7 \
 		libyaml-dev liblcms2-2 liblqr-1-0-dev libdjvulibre21 libxext6 libxext-dev libopenexr-dev libopenjp2-7-dev \
+		libmagickwand-6.q16-6 \
+		libmagickcore-6.q16-6 \
 		pkg-config; \
 		rm -rf /var/lib/apt/lists/*; \
 		\
@@ -630,6 +669,8 @@ RUN set -eux; \
 	mkdir -p /var/www/html; \
 	chmod 777 /var/www/html; \
 	mkdir -p "$PHP_INI_DIR/conf.d"; \
+	mkdir -p /var/log/php-extensions; \
+	chmod 777 /var/log/php-extensions; \
 	\
 	# 创建Apache目录
 	mkdir -p "$APACHE_LOG_DIR" "$APACHE_RUN_DIR" "$APACHE_LOCK_DIR" "$APACHE_RUN_DIR/socks"; \
@@ -653,11 +694,24 @@ COPY --from=php-builder /usr/local/ /usr/local/
 COPY --from=php-builder /etc/apache2/ /etc/apache2/
 COPY --from=php-builder /usr/lib/apache2/ /usr/lib/apache2/
 COPY --from=php-builder /etc/ld.so.conf.d/ /etc/ld.so.conf.d/
+COPY --from=php-builder /usr/local/imagemagick /usr/local/imagemagick
+# 复制PHP构建日志（包含PHP编译、扩展安装、Composer安装等所有构建信息）
+COPY --from=php-builder /tmp/php-build.log /tmp/php-build.log
 COPY ./build/php/apache2-foreground /usr/local/bin/
 
 # 配置Apache和系统环境
 RUN set -eux; \
+	# 配置 ImageMagick 库路径（如果真正安装了 ImageMagick，而非占位符）
+	if [ -d "/usr/local/imagemagick" ] && [ ! -f "/usr/local/imagemagick/.placeholder" ]; then \
+		echo "/usr/local/imagemagick/lib" > /etc/ld.so.conf.d/imagemagick.conf; \
+		ldconfig; \
+	fi; \
 	ldconfig; \
+	# 复制PHP构建日志到日志目录（如果存在）
+	if [ -f "/tmp/php-build.log" ]; then \
+		cp /tmp/php-build.log /var/log/php-extensions/php-build.log || true; \
+		chmod 644 /var/log/php-extensions/php-build.log || true; \
+	fi; \
 	chmod +x /usr/local/bin/apache2-foreground; \
 	chmod +x /usr/local/bin/docker-php-*; \
 	\

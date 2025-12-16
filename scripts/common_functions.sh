@@ -304,15 +304,12 @@ setup_docker_aliases() {
             echo -e "  ${GREEN}$alias_name${NC} - 进入对应容器"
         done
         echo ""
-
-    else
-        success "所有Docker别名已存在 (共 $aliases_found 个)"
     fi
 }
 
 # 设置配置目录权限，避免容器内权限问题
 setup_conf_permissions() {
-    info "设置配置目录权限..."
+    # info "设置配置目录权限..."
 
     # 确保conf目录存在并设置权限
     if [ -d "./conf" ]; then
@@ -341,7 +338,6 @@ setup_conf_permissions() {
     fi
 
     # 设置日志目录权限（ELK服务需要）
-    info "设置日志目录权限..."
     local logs_dir="./logs"
 
     # 创建日志目录（如果不存在）
@@ -360,7 +356,6 @@ setup_conf_permissions() {
         find "$logs_dir" -type d -exec chmod 777 {} \; 2>/dev/null || true
         find "$logs_dir" -type f -exec chmod 666 {} \; 2>/dev/null || true
 
-        info "日志目录权限设置完成"
     else
         warn "日志目录 $logs_dir 无法创建"
     fi
@@ -368,7 +363,7 @@ setup_conf_permissions() {
 
 # 清理日志文件函数
 cleanup_logs() {
-    info "清理日志文件..."
+    # info "清理日志文件..."
 
     local logs_dir="$PROJECT_DIR/logs"
 

@@ -1,0 +1,24 @@
+# ==========================================
+# WSL 环境专用 Docker Compose 配置
+# ==========================================
+# 用于解决 WSL 环境下数据库连接慢（5-10秒）的问题
+#
+# 使用方法：
+#   docker-compose -f docker-compose.yaml -f docker-compose.wsl.yaml up -d
+#
+# 或设置环境变量后直接使用：
+#   export COMPOSE_FILE=docker-compose.yaml:docker-compose.wsl.yaml
+#   docker-compose up -d
+#
+services:
+    # 覆盖 MySQL 服务配置，使用 WSL 优化的配置文件
+    # 注意：volumes 覆盖会替换整个列表，所以需要列出所有必要的 volumes
+    mysql:
+        volumes:
+            - mysql_data:/var/lib/mysql:rw
+            - ${MYSQL_CONF_FILE}:/etc/mysql/my.cnf:ro
+            - ./conf/mysql/conf.d/docker.cnf:/etc/mysql/conf.d/docker.cnf:ro,Z
+            # 使用 WSL 优化的 MySQL 配置（覆盖默认的环境配置文件）
+            - ./conf/mysql/conf.d/mysql-wsl.cnf:/etc/mysql/conf.d/mysql-env.cnf:ro,Z
+            - ${MYSQL_LOG_DIR}:/var/log/mysql:rw
+            - ./build/mysql/init-mysql-user.sh:/docker-entrypoint-initdb.d/init-mysql-user.sh:ro

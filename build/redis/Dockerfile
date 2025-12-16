@@ -44,6 +44,8 @@ RUN if [ "${CHANGE_SOURCE}" = "true" ]; then \
     fi
 
 COPY ./src/redis/ ${TMP_DIR}
+# 复制下载辅助脚本
+COPY ./scripts/download-helper.sh /tmp/download-helper.sh
 
 # 安装构建依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -65,11 +67,15 @@ RUN set -eux; \
     \
     cd ${TMP_DIR}; \
     \
+    # 使用 bash 加载下载辅助脚本并执行下载
+    bash -c '. /tmp/download-helper.sh && \
     if [ ! -f "redis-${REDIS_VERSION}.tar.gz" ]; then \
-        # 下载 Redis 源码
-        wget -O redis-${REDIS_VERSION}.tar.gz "https://download.redis.io/releases/redis-${REDIS_VERSION}.tar.gz" || \
-        wget -O redis-${REDIS_VERSION}.tar.gz "https://github.com/redis/redis/archive/refs/tags/${REDIS_VERSION}.tar.gz"; \
-    fi; \
+        download_if_missing "https://download.redis.io/releases/redis-${REDIS_VERSION}.tar.gz" "redis-${REDIS_VERSION}.tar.gz" || \
+        download_if_missing "https://github.com/redis/redis/archive/refs/tags/${REDIS_VERSION}.tar.gz" "redis-${REDIS_VERSION}.tar.gz" || { \
+            echo "下载失败"; \
+            exit 1; \
+        }; \
+    fi'; \
     \
     # 解压源码
     tar -xzf redis-${REDIS_VERSION}.tar.gz --strip-components=1; \

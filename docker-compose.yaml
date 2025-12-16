@@ -124,3 +124,9 @@ volumes:
     mysql_data:
     pgadmin:
     php_sessions:
+    # PostgreSQL数据卷（postgres服务需要）
+    postgres_data:
+        driver: local
+    # MongoDB数据卷（mongo服务需要）
+    mongo_data:
+        driver: local

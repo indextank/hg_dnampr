@@ -402,3 +402,9 @@ volumes:
         driver: local
     php_sessions:
         driver: local
+    # PostgreSQL数据卷（postgres服务需要）
+    postgres_data:
+        driver: local
+    # MongoDB数据卷（mongo服务需要）
+    mongo_data:
+        driver: local

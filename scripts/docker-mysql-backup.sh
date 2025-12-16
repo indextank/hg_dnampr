@@ -1,8 +1,8 @@
 #!/bin/bash
 # 设置mysql的登录用户名和密码(根据实际情况填写)
-mysql_user="backuser"
-mysql_password="WmjUOaMa6otvZjW"
-mysql_host="127.0.0.1"
+mysql_user="root"
+mysql_password="bxiI2b8ZLYbaAdQBRT"
+mysql_host="mysql"
 mysql_port="3306"
 mysql_charset="utf8mb4"
 mysql_database="wklan"

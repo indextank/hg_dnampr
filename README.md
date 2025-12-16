@@ -2,19 +2,37 @@
 
 [![Docker](https://img.shields.io/badge/Docker-Required-blue.svg)](https://www.docker.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![PHP](https://img.shields.io/badge/PHP-7.2--8.4-purple.svg)](https://www.php.net/)
+[![PHP](https://img.shields.io/badge/PHP-7.2--8.5-purple.svg)](https://www.php.net/)
 [![MySQL](https://img.shields.io/badge/MySQL-8.0-orange.svg)](https://www.mysql.com/)
 
 一款全功能的Docker一键部署套件，支持Nginx + Apache + PHP + MySQL + MongoDB + Redis + ELK等，满足日常开发及生产环境使用。
 
+## 📑 目录
+
+- [项目特点](#-项目特点)
+- [支持的服务](#-支持的服务)
+- [架构设计](#️-架构设计)
+- [详细配置](#️-详细配置)
+- [高级配置](#-高级配置)
+- [数据保护指南](#-数据保护指南)
+- [监控和日志](#-监控和日志)
+- [部署指南](#-部署指南)
+- [故障排除](#-故障排除)
+- [开发指南](#-开发指南)
+- [贡献指南](#-贡献指南)
+- [许可证](#-许可证)
+
+---
+
 ## 🌟 项目特点
 
 - **🚀 一键部署** - 支持一键构建和启动所有服务
-- **🔧 多版本支持** - PHP 7.2-8.4、MySQL 8.0、Redis 7.0等
+- **🔧 多版本支持** - PHP 7.2-8.5、MySQL 8.0、Redis 7.0等
 - **📦 分层配置** - 采用分层配置文件管理，便于维护
 - **🌍 环境自适应** - 智能代理检测，国内外环境自适应
 - **🔒 生产就绪** - 包含安全配置、性能优化、监控等
 - **📊 完整生态** - 支持ELK日志分析、开发工具栈等
+- **💾 数据安全** - 使用 Docker named volume，支持自动备份和恢复
 
 ## 📋 支持的服务
 
@@ -29,7 +47,8 @@
 
 | 版本    | 服务名  | 端口 | 说明               |
 | ------- | ------- | ---- | ------------------ |
-| PHP 8.4 | `php84` | 8084 | 最新版本，推荐使用 |
+| PHP 8.5 | `php85` | 8085 | 最新版本           |
+| PHP 8.4 | `php84` | 8084 | 稳定版本，推荐使用 |
 | PHP 8.3 | `php83` | 8083 | 稳定版本           |
 | PHP 8.2 | `php82` | 8082 | 稳定版本           |
 | PHP 8.1 | `php81` | 8081 | 稳定版本           |
@@ -86,8 +105,23 @@ Docker Compose Files:
 ├── docker-compose-ELK.yaml       # ELK日志栈编排
 ├── docker-compose-spug+gitea+rap2.yaml  # 开发工具栈编排
 ├── docker-compose.dev.yaml       # 开发环境配置
-└── docker-compose.prod.yaml      # 生产环境配置
+├── docker-compose.prod.yaml      # 生产环境配置
+└── docker-compose.wsl.yaml       # WSL环境优化配置
 ```
+
+### 数据持久化架构
+
+所有数据库使用 **Docker named volume** 进行数据持久化：
+
+- **MySQL**: `mysql_data` volume
+- **MongoDB**: `mongo_data` volume
+- **PostgreSQL**: `postgres_data` volume
+
+优势：
+- ✅ 数据独立于容器和镜像，容器删除不影响数据
+- ✅ 存储在 Linux 文件系统，I/O 性能优异
+- ✅ Docker 统一管理，无需手动创建目录
+- ✅ 支持自动备份和恢复
 
 ## ⚙️ 详细配置
 
@@ -111,23 +145,27 @@ NO_PROXY=localhost,127.0.0.1,172.17.0.0/16
 
 # 路径配置
 GLOBAL_WEB_PATH=/data/wwwroot             # 项目根目录
-MYSQL_DATA_DIR=/data/myDockerData/mysql_data
+# 注意：数据库数据存储默认使用 Docker named volume
+# MySQL: mysql_data, MongoDB: mongo_data, PostgreSQL: postgres_data
 ```
 
 #### PHP配置 (`php.env`)
 
 ```bash
 # PHP版本配置
+PHP85_VERSION=8.5.0                       # PHP 8.5版本
 PHP84_VERSION=8.4.0                       # PHP 8.4版本
 PHP83_VERSION=8.3.0                       # PHP 8.3版本
 # ... 其他版本
 
 # 端口配置
+PHP85_PORT=8085                           # PHP 8.5端口
 PHP84_PORT=8084                           # PHP 8.4端口
 PHP83_PORT=8083                           # PHP 8.3端口
 # ... 其他端口
 
 # 服务器名称配置
+PHP85_SERVER_NAME=php85.default.com       # PHP 8.5服务器名称
 PHP84_SERVER_NAME=php84.default.com       # PHP 8.4服务器名称
 PHP83_SERVER_NAME=php83.default.com       # PHP 8.3服务器名称
 # ... 其他服务器名称
@@ -194,8 +232,14 @@ POSTGRES_PASSWORD=postgres123             # PostgreSQL密码
 - `stop` - 停止服务
 - `restart` - 重启服务
 - `down` - 停止并删除容器
-- `status` - 查看服务状态
+- `ps` - 查看服务状态
 - `logs` - 查看服务日志
+- `exec` - 进入服务容器
+
+**特殊功能：**
+
+- WSL 环境自动检测：在 WSL 环境下启动 MySQL 时，自动使用 WSL 优化配置
+- 自动添加 MySQL 备份服务：启动 MySQL 时自动添加备份服务
 
 ## 🔧 高级配置
 
@@ -249,6 +293,263 @@ networks:
   - internal                              # 内部网络
   - external                              # 外部网络
 ```
+
+## 💾 数据保护指南
+
+### 📋 概述
+
+使用 Docker named volume 进行数据持久化时，虽然数据存储在 Docker 管理的卷中，但仍需要采取适当的备份策略来防止数据丢失。
+
+### ⚠️ 数据丢失风险场景
+
+#### 1. 容器损坏
+- **场景**：容器崩溃、配置错误导致无法启动
+- **影响**：容器无法使用，但 **volume 数据仍然安全**
+- **解决方案**：重新创建容器，挂载相同的 volume
+
+```bash
+# 重新创建容器，数据自动恢复
+docker stop mysql
+docker rm mysql
+./up.sh mysql up -d
+```
+
+#### 2. 镜像损坏
+- **场景**：镜像文件损坏、被误删除
+- **影响**：无法创建新容器，但 **volume 数据仍然安全**
+- **解决方案**：重新构建或拉取镜像，挂载相同的 volume
+
+```bash
+# 重新构建镜像，挂载相同 volume
+./build.sh mysql --no-cache
+./up.sh mysql up -d
+```
+
+#### 3. Volume 损坏（最严重）
+- **场景**：Docker 存储驱动故障、磁盘损坏、误删除 volume
+- **影响**：**数据可能丢失**
+- **解决方案**：从备份恢复
+
+#### 4. 主机系统故障
+- **场景**：系统崩溃、磁盘故障
+- **影响**：**数据可能丢失**
+- **解决方案**：从备份恢复
+
+### 🛡️ 数据保护策略
+
+#### 策略 1：定期备份 Volume（推荐）
+
+**备份单个 Volume**
+
+```bash
+# 备份 MySQL 数据卷
+./scripts/docker-volume-backup.sh mysql_data /backup/volumes
+
+# 备份 MongoDB 数据卷
+./scripts/docker-volume-backup.sh mongo_data /backup/volumes
+
+# 备份 PostgreSQL 数据卷
+./scripts/docker-volume-backup.sh postgres_data /backup/volumes
+```
+
+**批量备份所有 Volumes**
+
+```bash
+# 备份所有数据库 volumes
+./scripts/backup-all-volumes.sh /backup/volumes
+```
+
+**从备份恢复**
+
+```bash
+# 恢复 MySQL 数据卷
+./scripts/docker-volume-restore.sh mysql_data /backup/volumes/mysql_data_backup_20231214_120000.tar.gz
+
+# 恢复 MongoDB 数据卷
+./scripts/docker-volume-restore.sh mongo_data /backup/volumes/mongo_data_backup_20231214_120000.tar.gz
+
+# 恢复 PostgreSQL 数据卷
+./scripts/docker-volume-restore.sh postgres_data /backup/volumes/postgres_data_backup_20231214_120000.tar.gz
+```
+
+#### 策略 2：应用级备份（数据库导出）
+
+**MySQL 备份**
+
+```bash
+# 使用项目自带的备份脚本
+./scripts/docker_mysql_backup_restore.sh
+
+# 或使用 mysqldump
+docker exec mysql mysqldump -u root -p --all-databases > backup.sql
+```
+
+**MongoDB 备份**
+
+```bash
+# 使用 mongodump
+docker exec mongo mongodump --out /backup/mongo
+docker cp mongo:/backup/mongo ./backup/mongo
+```
+
+**PostgreSQL 备份**
+
+```bash
+# 使用 pg_dump
+docker exec postgres pg_dumpall -U postgres > backup.sql
+```
+
+#### 策略 3：自动化定期备份
+
+**使用 Cron 定时任务**
+
+```bash
+# 编辑 crontab
+crontab -e
+
+# 每天凌晨 2 点备份所有 volumes
+0 2 * * * /data/hg_dnmpr/scripts/backup-all-volumes.sh /backup/volumes
+
+# 每周日凌晨 3 点备份并清理 30 天前的备份
+0 3 * * 0 /data/hg_dnmpr/scripts/backup-all-volumes.sh /backup/volumes && find /backup/volumes -name "*.tar.gz" -mtime +30 -delete
+```
+
+### 📦 备份文件管理
+
+**备份文件命名规则**
+
+```
+{volume_name}_backup_YYYYMMDD_HHMMSS.tar.gz
+{volume_name}_backup_YYYYMMDD_HHMMSS.tar.gz.sha256  # 校验和文件
+```
+
+**备份文件存储建议**
+
+1. **本地存储**：`/backup/volumes/` 或 `/data/backup/volumes/`
+2. **远程存储**：NFS、S3、云存储等
+3. **异地备份**：定期同步到其他服务器或云存储
+
+**备份保留策略**
+
+- **每日备份**：保留 7 天
+- **每周备份**：保留 4 周
+- **每月备份**：保留 12 个月
+
+### 🔄 恢复流程
+
+#### 场景 1：容器损坏，Volume 完好
+
+```bash
+# 1. 停止并删除损坏的容器
+docker stop mysql
+docker rm mysql
+
+# 2. 重新创建容器，挂载相同的 volume
+./up.sh mysql up -d
+
+# 数据自动恢复，无需额外操作
+```
+
+#### 场景 2：Volume 损坏或丢失
+
+```bash
+# 1. 停止相关容器
+docker stop mysql
+
+# 2. 删除损坏的 volume（如果存在）
+docker volume rm mysql_data
+
+# 3. 从备份恢复
+./scripts/docker-volume-restore.sh mysql_data /backup/volumes/mysql_data_backup_20231214_120000.tar.gz
+
+# 4. 重新启动容器
+./up.sh mysql up -d
+```
+
+#### 场景 3：主机系统故障
+
+```bash
+# 1. 在新主机上安装 Docker 和项目
+
+# 2. 恢复备份文件到新主机
+
+# 3. 创建 volume 并恢复数据
+./scripts/docker-volume-restore.sh mysql_data /backup/volumes/mysql_data_backup_20231214_120000.tar.gz
+
+# 4. 启动服务
+./up.sh mysql up -d
+```
+
+### ✅ 最佳实践
+
+#### 1. 多重备份策略
+
+- **Volume 级别备份**：完整备份整个 volume（推荐用于灾难恢复）
+- **应用级别备份**：数据库导出备份（推荐用于数据迁移和版本控制）
+- **定期备份**：自动化定期备份，避免手动遗漏
+
+#### 2. 备份验证
+
+```bash
+# 验证备份文件完整性
+sha256sum -c mysql_data_backup_20231214_120000.tar.gz.sha256
+
+# 测试恢复流程（在测试环境）
+./scripts/docker-volume-restore.sh mysql_data_test /backup/volumes/mysql_data_backup_20231214_120000.tar.gz
+```
+
+#### 3. 监控和告警
+
+- 监控备份任务执行状态
+- 监控备份文件大小变化
+- 设置备份失败告警
+
+#### 4. 文档记录
+
+- 记录备份策略和恢复流程
+- 记录备份文件位置和访问权限
+- 定期测试恢复流程
+
+### 🔍 检查 Volume 状态
+
+```bash
+# 列出所有 volumes
+docker volume ls
+
+# 查看 volume 详细信息
+docker volume inspect mysql_data
+
+# 查看 volume 使用情况
+docker system df -v
+```
+
+### 📝 总结
+
+使用 Docker named volume 的优势：
+
+✅ **数据持久化**：容器删除不会影响数据  
+✅ **性能优化**：存储在 Linux 文件系统，I/O 性能好  
+✅ **易于管理**：Docker 统一管理，无需手动创建目录  
+
+但仍需要：
+
+⚠️ **定期备份**：防止 volume 损坏或主机故障  
+⚠️ **多重备份**：Volume 备份 + 应用级备份  
+⚠️ **定期测试**：验证备份和恢复流程  
+
+### 🆘 紧急恢复
+
+如果遇到数据丢失紧急情况：
+
+1. **立即停止相关容器**，防止进一步数据损坏
+2. **检查 volume 状态**：`docker volume inspect {volume_name}`
+3. **查找最新备份**：`ls -lt /backup/volumes/ | head -10`
+4. **执行恢复**：使用恢复脚本从备份恢复
+5. **验证数据**：启动容器后验证数据完整性
+
+---
+
+**重要提示**：定期备份是数据安全的关键！建议至少每天备份一次，重要数据建议每小时备份。
 
 ## 📊 监控和日志
 
@@ -322,6 +623,9 @@ curl http://localhost:8084
 
 # 4. 配置监控
 # 使用Prometheus + Grafana监控
+
+# 5. 配置自动备份
+# 设置 cron 定时任务备份 volumes
 ```
 
 ### CI/CD集成
@@ -401,43 +705,6 @@ docker exec -it php84_apache bash
 
 # 查看服务依赖
 docker-compose config
-```
-
-## 📚 开发指南
-
-### 添加新服务
-
-1. 在 `build/` 目录下创建Dockerfile
-2. 在 `conf/` 目录下添加配置文件
-3. 在 `compose_*.yaml` 中添加服务定义
-4. 在 `config/env/` 中添加环境变量
-
-### 自定义构建
-
-```dockerfile
-# build/custom/Dockerfile
-FROM php:8.4-apache
-
-# 安装扩展
-RUN docker-php-ext-install mysqli pdo_mysql
-
-# 配置Apache
-COPY conf/apache/custom.conf /etc/apache2/sites-available/
-
-# 启动服务
-CMD ["apache2-foreground"]
-```
-
-### 扩展开发
-
-```bash
-# 创建自定义扩展
-mkdir -p build/extensions/custom
-cd build/extensions/custom
-
-# 编写扩展代码
-# 编译扩展
-# 集成到PHP镜像
 ```
 
 ## 🤝 贡献指南

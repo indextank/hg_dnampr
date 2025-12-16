@@ -9,9 +9,51 @@
 
 set -euo pipefail
 
-# 禁用 Docker Compose 的 buildx/bake 警告
-export DOCKER_BUILDKIT=0
-export COMPOSE_DOCKER_CLI_BUILD=0
+# ==========================================
+# 自动检测 Docker Desktop 和 buildx
+# ==========================================
+detect_docker_environment() {
+    local has_docker_desktop=false
+    local has_buildx=false
+    
+    # 检测 Docker Desktop
+    # 方法1: 检查 Docker Desktop 特有的 context
+    if docker context ls 2>/dev/null | grep -q "desktop-linux\|desktop-windows"; then
+        has_docker_desktop=true
+    fi
+    
+    # 方法2: 检查 Docker Desktop 进程 (Windows/Mac)
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]] || [[ "$OSTYPE" == "darwin"* ]]; then
+        if pgrep -f "Docker Desktop" >/dev/null 2>&1 || pgrep -f "com.docker.backend" >/dev/null 2>&1; then
+            has_docker_desktop=true
+        fi
+    fi
+    
+    # 方法3: 检查 Docker 信息中的 Operating System 字段
+    if docker info 2>/dev/null | grep -q "Docker Desktop\|Docker for"; then
+        has_docker_desktop=true
+    fi
+    
+    # 检测 buildx 插件
+    if docker buildx version >/dev/null 2>&1; then
+        has_buildx=true
+    fi
+    
+    # 输出检测结果
+    if [[ "$has_docker_desktop" == "true" && "$has_buildx" == "true" ]]; then
+        echo "INFO: 检测到 Docker Desktop 和 buildx 插件，启用 BuildKit 功能"
+        export DOCKER_BUILDKIT=1
+        export COMPOSE_DOCKER_CLI_BUILD=1
+    else
+        echo "INFO: 未检测到完整的 Docker Desktop 环境，禁用 buildx/bake 功能"
+        # 禁用 Docker Compose 的 buildx/bake 警告
+        export DOCKER_BUILDKIT=0
+        export COMPOSE_DOCKER_CLI_BUILD=0
+    fi
+}
+
+# 执行 Docker 环境检测
+detect_docker_environment
 
 # 脚本配置
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

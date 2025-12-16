@@ -65,9 +65,16 @@ download_file() {
     local output_file="$2"
     local description="${3:-文件}"
     
-    if [[ -f "$output_file" ]]; then
+    # 检查文件是否存在且大小大于0
+    if [[ -f "$output_file" ]] && [[ -s "$output_file" ]]; then
         info "$description 已存在，跳过下载: $(basename "$output_file")"
         return 0
+    fi
+    
+    # 如果文件存在但大小为0，删除它
+    if [[ -f "$output_file" ]] && [[ ! -s "$output_file" ]]; then
+        warn "发现空文件，删除后重新下载: $(basename "$output_file")"
+        rm -f "$output_file"
     fi
     
     log "下载 $description: $(basename "$output_file")"
@@ -94,6 +101,49 @@ download_file() {
     return 1
 }
 
+# OpenSSL相关下载（统一管理）
+download_openssl_dependencies() {
+    local openssl_src_dir="$SRC_DIR/openssl"
+    
+    ensure_directory "$openssl_src_dir"
+    
+    # 检查是否有需要下载的文件
+    local need_download=false
+    
+    # OpenSSL (主版本)
+    if [[ -n "${OPENSSL_VERSION:-}" ]] && [[ ! -f "$openssl_src_dir/openssl-${OPENSSL_VERSION}.tar.gz" ]]; then
+        need_download=true
+    fi
+    
+    # OpenSSL 1.1版本（兼容旧版本）
+    if [[ -n "${OPENSSL_VERSION_11:-}" ]] && [[ ! -f "$openssl_src_dir/openssl-${OPENSSL_VERSION_11}.tar.gz" ]]; then
+        need_download=true
+    fi
+    
+    # 只有在需要下载时才显示提示信息
+    if [[ "$need_download" == "true" ]]; then
+        info "下载OpenSSL相关依赖..."
+    else
+        info "检查OpenSSL相关依赖..."
+    fi
+    
+    # OpenSSL (主版本)
+    if [[ -n "${OPENSSL_VERSION:-}" ]]; then
+        download_file \
+            "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" \
+            "$openssl_src_dir/openssl-${OPENSSL_VERSION}.tar.gz" \
+            "OpenSSL ${OPENSSL_VERSION}"
+    fi
+    
+    # OpenSSL 1.1版本（兼容旧版本）
+    if [[ -n "${OPENSSL_VERSION_11:-}" ]]; then
+        download_file \
+            "https://www.openssl.org/source/openssl-${OPENSSL_VERSION_11}.tar.gz" \
+            "$openssl_src_dir/openssl-${OPENSSL_VERSION_11}.tar.gz" \
+            "OpenSSL ${OPENSSL_VERSION_11}"
+    fi
+}
+
 # PHP相关下载
 download_php_dependencies() {
     local php_version="$1"
@@ -101,21 +151,59 @@ download_php_dependencies() {
     
     ensure_directory "$php_src_dir"
     
-    info "下载PHP $php_version 相关依赖..."
+    # 先下载 OpenSSL（统一管理）
+    download_openssl_dependencies
+    
+    # 检查是否有需要下载的文件
+    local need_download=false
+    
+    # PHP源码
+    if [[ ! -f "$php_src_dir/php-${php_version}.tar.xz" ]]; then
+        need_download=true
+    fi
+    
+    # cURL
+    if [[ -n "${CURL_VERSION:-}" ]] && [[ ! -f "$php_src_dir/curl-${CURL_VERSION}.tar.xz" ]]; then
+        need_download=true
+    fi
+    
+    # FreeType
+    if [[ -n "${FREETYPE_VERSION:-}" ]] && [[ ! -f "$php_src_dir/freetype-${FREETYPE_VERSION}.tar.xz" ]]; then
+        need_download=true
+    fi
+    
+    # LibWebP
+    if [[ -n "${LIBWEBP_VERSION:-}" ]] && [[ ! -f "$php_src_dir/libwebp-${LIBWEBP_VERSION}.tar.gz" ]]; then
+        need_download=true
+    fi
+    
+    # LibIconv
+    if [[ -n "${LIBICONV_VERSION:-}" ]] && [[ ! -f "$php_src_dir/libiconv-${LIBICONV_VERSION}.tar.gz" ]]; then
+        need_download=true
+    fi
+    
+    # LibSodium
+    if [[ -n "${LIBSODIUM_VERSION:-}" ]] && [[ ! -f "$php_src_dir/libsodium-${LIBSODIUM_VERSION}.tar.gz" ]]; then
+        need_download=true
+    fi
+    
+    # ImageMagick
+    if [[ -n "${IMAGICK_VERSION:-}" ]] && [[ ! -f "$php_src_dir/ImageMagick-${IMAGICK_VERSION}.tar.gz" ]]; then
+        need_download=true
+    fi
+    
+    # 只有在需要下载时才显示提示信息
+    if [[ "$need_download" == "true" ]]; then
+        info "下载PHP $php_version 相关依赖..."
+    else
+        info "检查PHP $php_version 相关依赖..."
+    fi
     
     # PHP源码
     download_file \
         "https://www.php.net/distributions/php-${php_version}.tar.xz" \
         "$php_src_dir/php-${php_version}.tar.xz" \
         "PHP ${php_version} 源码"
-    
-    # OpenSSL
-    if [[ -n "${OPENSSL_VERSION:-}" ]]; then
-        download_file \
-            "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" \
-            "$php_src_dir/openssl-${OPENSSL_VERSION}.tar.gz" \
-            "OpenSSL ${OPENSSL_VERSION}"
-    fi
     
     # cURL
     if [[ -n "${CURL_VERSION:-}" ]]; then
@@ -141,11 +229,26 @@ download_php_dependencies() {
             "LibWebP ${LIBWEBP_VERSION}"
     fi
     
+    # LibIconv
+    if [[ -n "${LIBICONV_VERSION:-}" ]]; then
+        download_file \
+            "https://ftp.gnu.org/pub/gnu/libiconv/libiconv-${LIBICONV_VERSION}.tar.gz" \
+            "$php_src_dir/libiconv-${LIBICONV_VERSION}.tar.gz" \
+            "LibIconv ${LIBICONV_VERSION}"
+    fi
+    
+    # LibSodium
+    if [[ -n "${LIBSODIUM_VERSION:-}" ]]; then
+        download_file \
+            "https://download.libsodium.org/libsodium/releases/libsodium-${LIBSODIUM_VERSION}.tar.gz" \
+            "$php_src_dir/libsodium-${LIBSODIUM_VERSION}.tar.gz" \
+            "LibSodium ${LIBSODIUM_VERSION}"
+    fi
+    
     # ImageMagick
     if [[ -n "${IMAGICK_VERSION:-}" ]]; then
         download_file \
             "https://imagemagick.org/archive/ImageMagick-${IMAGICK_VERSION}.tar.gz" \
-            # "https://github.com/ImageMagick/ImageMagick/archive/${IMAGICK_VERSION}.tar.gz" \
             "$php_src_dir/ImageMagick-${IMAGICK_VERSION}.tar.gz" \
             "ImageMagick ${IMAGICK_VERSION}"
     fi
@@ -157,7 +260,38 @@ download_nginx_dependencies() {
     
     ensure_directory "$nginx_src_dir"
     
-    info "下载Nginx相关依赖..."
+    # 先下载 OpenSSL（统一管理）
+    download_openssl_dependencies
+    
+    # 检查是否有需要下载的文件
+    local need_download=false
+    
+    # Nginx源码
+    if [[ -n "${NGINX_VERSION:-}" ]] && [[ ! -f "$nginx_src_dir/nginx-${NGINX_VERSION}.tar.gz" ]]; then
+        need_download=true
+    fi
+    
+    # Tengine源码
+    if [[ -n "${TENGINE_VERSION:-}" ]] && [[ ! -f "$nginx_src_dir/tengine-${TENGINE_VERSION}.tar.gz" ]]; then
+        need_download=true
+    fi
+    
+    # PCRE
+    if [[ -n "${PCRE_VERSION:-}" ]] && [[ ! -f "$nginx_src_dir/pcre-${PCRE_VERSION}.tar.gz" ]]; then
+        need_download=true
+    fi
+    
+    # Headers More Nginx Module
+    if [[ -n "${HEADERS_MORE_NGINX_MODULE_VERSION:-}" ]] && [[ ! -f "$nginx_src_dir/headers-more-nginx-module-${HEADERS_MORE_NGINX_MODULE_VERSION}.tar.gz" ]]; then
+        need_download=true
+    fi
+    
+    # 只有在需要下载时才显示提示信息
+    if [[ "$need_download" == "true" ]]; then
+        info "下载Nginx相关依赖..."
+    else
+        info "检查Nginx相关依赖..."
+    fi
     
     # Nginx源码
     if [[ -n "${NGINX_VERSION:-}" ]]; then
@@ -173,14 +307,6 @@ download_nginx_dependencies() {
             "https://github.com/alibaba/tengine/archive/${TENGINE_VERSION}.tar.gz" \
             "$nginx_src_dir/tengine-${TENGINE_VERSION}.tar.gz" \
             "Tengine ${TENGINE_VERSION}"
-    fi
-    
-    # OpenSSL (for Nginx)
-    if [[ -n "${OPENSSL_VERSION:-}" ]]; then
-        download_file \
-            "https://openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" \
-            "$nginx_src_dir/openssl-${OPENSSL_VERSION}.tar.gz" \
-            "OpenSSL ${OPENSSL_VERSION} (for Nginx)"
     fi
     
     # PCRE
@@ -206,7 +332,25 @@ download_redis_dependencies() {
     
     ensure_directory "$redis_src_dir"
     
-    info "下载Redis相关依赖..."
+    # 检查是否有需要下载的文件
+    local need_download=false
+    
+    # Redis源码
+    if [[ -n "${REDIS_VERSION:-}" ]] && [[ ! -f "$redis_src_dir/redis-${REDIS_VERSION}.tar.gz" ]]; then
+        need_download=true
+    fi
+    
+    # Valkey源码
+    if [[ -n "${VALKEY_VERSION:-}" ]] && [[ ! -f "$redis_src_dir/valkey-${VALKEY_VERSION}.tar.gz" ]]; then
+        need_download=true
+    fi
+    
+    # 只有在需要下载时才显示提示信息
+    if [[ "$need_download" == "true" ]]; then
+        info "下载Redis相关依赖..."
+    else
+        info "检查Redis相关依赖..."
+    fi
     
     # Redis源码
     if [[ -n "${REDIS_VERSION:-}" ]]; then
@@ -231,7 +375,33 @@ download_mysql_dependencies() {
     
     ensure_directory "$mysql_src_dir"
     
-    info "下载MySQL相关依赖..."
+    # 检查是否有需要下载的文件
+    local need_download=false
+    local mysql_file=""
+    local gosu_file=""
+    
+    # MySQL源码
+    if [[ -n "${MYSQL_VERSION:-}" ]]; then
+        mysql_file="$mysql_src_dir/mysql-${MYSQL_VERSION}.tar.gz"
+        if [[ ! -f "$mysql_file" ]]; then
+            need_download=true
+        fi
+    fi
+    
+    # Gosu
+    if [[ -n "${GOSU_VERSION:-}" ]]; then
+        gosu_file="$mysql_src_dir/gosu-amd64"
+        if [[ ! -f "$gosu_file" ]]; then
+            need_download=true
+        fi
+    fi
+    
+    # 只有在需要下载时才显示提示信息
+    if [[ "$need_download" == "true" ]]; then
+        info "下载MySQL相关依赖..."
+    else
+        info "检查MySQL相关依赖..."
+    fi
     
     # MySQL源码
     if [[ -n "${MYSQL_VERSION:-}" ]]; then
@@ -256,7 +426,20 @@ download_mongo_dependencies() {
     
     ensure_directory "$mongo_src_dir"
     
-    info "下载MongoDB相关依赖..."
+    # 检查是否有需要下载的文件
+    local need_download=false
+    
+    # MongoDB源码
+    if [[ -n "${MONGO_VERSION:-}" ]] && [[ ! -f "$mongo_src_dir/mongo-${MONGO_VERSION}.tar.gz" ]]; then
+        need_download=true
+    fi
+    
+    # 只有在需要下载时才显示提示信息
+    if [[ "$need_download" == "true" ]]; then
+        info "下载MongoDB相关依赖..."
+    else
+        info "检查MongoDB相关依赖..."
+    fi
     
     # MongoDB源码
     if [[ -n "${MONGO_VERSION:-}" ]]; then
@@ -273,7 +456,24 @@ download_postgres_dependencies() {
     
     ensure_directory "$postgres_src_dir"
     
-    info "下载PostgreSQL相关依赖..."
+    # 检查是否有需要下载的文件
+    local need_download=false
+    
+    # PostgreSQL源码 (使用PG_VERSION变量)
+    if [[ -n "${PG_VERSION:-}" ]]; then
+        # 提取主版本号 (例如从17.5-1.pgdg120+1提取17.5)
+        local pg_main_version=$(echo "${PG_VERSION}" | sed 's/-.*$//')
+        if [[ ! -f "$postgres_src_dir/postgresql-${pg_main_version}.tar.gz" ]]; then
+            need_download=true
+        fi
+    fi
+    
+    # 只有在需要下载时才显示提示信息
+    if [[ "$need_download" == "true" ]]; then
+        info "下载PostgreSQL相关依赖..."
+    else
+        info "检查PostgreSQL相关依赖..."
+    fi
     
     # PostgreSQL源码 (使用PG_VERSION变量)
     if [[ -n "${PG_VERSION:-}" ]]; then
@@ -292,7 +492,40 @@ download_elk_dependencies() {
     
     ensure_directory "$elk_src_dir"
     
-    info "下载ELK相关依赖..."
+    # 检查是否有需要下载的文件
+    local need_download=false
+    
+    # Elasticsearch
+    if [[ -n "${ELK_VERSION:-}" ]]; then
+        local es_dir="$elk_src_dir/elasticsearch"
+        if [[ ! -f "$es_dir/elasticsearch-${ELK_VERSION}-linux-x86_64.tar.gz" ]]; then
+            need_download=true
+        fi
+        
+        # Kibana
+        local kibana_dir="$elk_src_dir/kibana"
+        if [[ ! -f "$kibana_dir/kibana-${ELK_VERSION}-linux-x86_64.tar.gz" ]]; then
+            need_download=true
+        fi
+        
+        # Logstash
+        local logstash_dir="$elk_src_dir/logstash"
+        if [[ ! -f "$logstash_dir/logstash-${ELK_VERSION}-linux-x86_64.tar.gz" ]]; then
+            need_download=true
+        fi
+    fi
+    
+    # Tini
+    if [[ -n "${TINI_VERSION:-}" ]] && [[ ! -f "$elk_src_dir/tini" ]]; then
+        need_download=true
+    fi
+    
+    # 只有在需要下载时才显示提示信息
+    if [[ "$need_download" == "true" ]]; then
+        info "下载ELK相关依赖..."
+    else
+        info "检查ELK相关依赖..."
+    fi
     
     # Elasticsearch
     if [[ -n "${ELK_VERSION:-}" ]]; then
@@ -370,21 +603,45 @@ download_service_dependencies() {
         elk)
             download_elk_dependencies
             ;;
+        openssl)
+            download_openssl_dependencies
+            ;;
         all)
             # 下载所有依赖
-            download_php_dependencies "${PHP84_VERSION:-}"
-            download_php_dependencies "${PHP83_VERSION:-}"
-            download_php_dependencies "${PHP82_VERSION:-}"
-            download_php_dependencies "${PHP81_VERSION:-}"
-            download_php_dependencies "${PHP80_VERSION:-}"
-            download_php_dependencies "${PHP74_VERSION:-}"
-            download_php_dependencies "${PHP72_VERSION:-}"
+            info "开始下载所有服务的依赖..."
+            download_openssl_dependencies
+            # 下载所有 PHP 版本的依赖（只下载一次共享依赖）
+            if [[ -n "${PHP85_VERSION:-}" ]]; then
+                download_php_dependencies "${PHP85_VERSION}"
+            fi
+            if [[ -n "${PHP84_VERSION:-}" ]]; then
+                download_php_dependencies "${PHP84_VERSION}"
+            fi
+            if [[ -n "${PHP83_VERSION:-}" ]]; then
+                download_php_dependencies "${PHP83_VERSION}"
+            fi
+            if [[ -n "${PHP82_VERSION:-}" ]]; then
+                download_php_dependencies "${PHP82_VERSION}"
+            fi
+            if [[ -n "${PHP81_VERSION:-}" ]]; then
+                download_php_dependencies "${PHP81_VERSION}"
+            fi
+            if [[ -n "${PHP80_VERSION:-}" ]]; then
+                download_php_dependencies "${PHP80_VERSION}"
+            fi
+            if [[ -n "${PHP74_VERSION:-}" ]]; then
+                download_php_dependencies "${PHP74_VERSION}"
+            fi
+            if [[ -n "${PHP72_VERSION:-}" ]]; then
+                download_php_dependencies "${PHP72_VERSION}"
+            fi
             download_nginx_dependencies
             download_redis_dependencies
             download_mysql_dependencies
             download_mongo_dependencies
             download_postgres_dependencies
             download_elk_dependencies
+            success "所有依赖下载完成！"
             ;;
         *)
             warn "未知服务: $service"
@@ -405,7 +662,7 @@ main() {
     # 如果没有指定服务，显示帮助信息
     if [[ $# -eq 0 ]]; then
         echo "使用方法: $0 [服务名...]"
-        echo "支持的服务: php84, php83, php82, php81, php80, php74, php72, nginx, tengine, redis, valkey, mysql, mongo, postgres, elk, all"
+        echo "支持的服务: php85 php84, php83, php82, php81, php80, php74, php72, nginx, tengine, redis, valkey, mysql, mongo, postgres, elk, openssl, all"
         exit 1
     fi
     

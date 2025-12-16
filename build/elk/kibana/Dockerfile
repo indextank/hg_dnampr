@@ -23,6 +23,8 @@ RUN set -eux; \
   DEBIAN_FRONTEND=noninteractive apt-get install -y wget
 
 COPY ./src/elk/kibana ${TMP_DIR}
+# 复制下载辅助脚本
+COPY ./scripts/download-helper.sh /tmp/download-helper.sh
 
 WORKDIR ${TMP_DIR}
 
@@ -30,9 +32,12 @@ RUN set -eux; \
 	\
 	cd "${TMP_DIR}"; \
 	\
-	if [ ! -f "kibana-${ELK_VERSION}-linux-$(arch).tar.gz" ]; then \
-        wget --limit-rate=100M --tries=6 -c --no-check-certificate "https://artifacts.elastic.co/downloads/kibana/kibana-${ELK_VERSION}-linux-$(arch).tar.gz"; \
-	fi; \
+	# 使用 bash 加载下载辅助脚本并执行下载
+	bash -c '. /tmp/download-helper.sh && \
+	download_if_missing "https://artifacts.elastic.co/downloads/kibana/kibana-${ELK_VERSION}-linux-$(arch).tar.gz" "kibana-${ELK_VERSION}-linux-$(arch).tar.gz" || { \
+		echo "下载失败"; \
+		exit 1; \
+	}'; \
   \
   mkdir -p /usr/share/kibana
 
@@ -79,6 +84,8 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 COPY ./src/elk/kibana ${TMP_DIR}
+# 复制下载辅助脚本
+COPY ./scripts/download-helper.sh /tmp/download-helper.sh
 
 # Add an init process, check the checksum to make sure it's a match
 RUN set -eux; \

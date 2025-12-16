@@ -30,6 +30,10 @@ RUN set -eux; \
     vim
 
 COPY ./src/nginx/ ${TMP_DIR}
+# 复制 OpenSSL（统一管理，从 src/openssl/ 目录）
+COPY ./src/openssl/openssl-${OPENSSL_VERSION}.tar.gz ${TMP_DIR}/
+# 复制下载辅助脚本
+COPY ./scripts/download-helper.sh /tmp/download-helper.sh
 WORKDIR ${TMP_DIR}
 
 ENV RUN_USER=nginx
@@ -43,22 +47,16 @@ RUN set -eux; \
     \
     cd ${TMP_DIR}; \
     \
-    # 下载所需的源码包
-    if [ ! -f "nginx-${NGINX_VERSION}.tar.gz" ]; then \
-        curl -L "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o nginx-${NGINX_VERSION}.tar.gz; \
-    fi; \
-    \
-    if [ ! -f "openssl-${OPENSSL_VERSION}.tar.gz" ]; then \
-        curl -L "https://openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" -o openssl-${OPENSSL_VERSION}.tar.gz; \
-    fi; \
-    \
-    if [ ! -f "pcre-${PCRE_VERSION}.tar.gz" ]; then \
-        curl -L "https://ftp.exim.org/pub/pcre/pcre-${PCRE_VERSION}.tar.gz" -o pcre-${PCRE_VERSION}.tar.gz; \
-    fi; \
-    \
-    if [ ! -f "headers-more-nginx-module-${HMNM_VERSION}.tar.gz" ]; then \
-        curl -L "https://github.com/openresty/headers-more-nginx-module/archive/v${HMNM_VERSION}.tar.gz" -o headers-more-nginx-module-${HMNM_VERSION}.tar.gz; \
-    fi; \
+    # 使用 bash 加载下载辅助脚本并执行下载
+    bash -c '. /tmp/download-helper.sh && \
+    parallel_download \
+        "nginx-${NGINX_VERSION}.tar.gz:https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+        "openssl-${OPENSSL_VERSION}.tar.gz:https://openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" \
+        "pcre-${PCRE_VERSION}.tar.gz:https://ftp.exim.org/pub/pcre/pcre-${PCRE_VERSION}.tar.gz" \
+        "headers-more-nginx-module-${HMNM_VERSION}.tar.gz:https://github.com/openresty/headers-more-nginx-module/archive/v${HMNM_VERSION}.tar.gz" || { \
+        echo "下载失败"; \
+        exit 1; \
+    }'; \
     \
     # 解压源码包
     tar xzf openssl-${OPENSSL_VERSION}.tar.gz; \
