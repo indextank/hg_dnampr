@@ -49,6 +49,10 @@ detect_docker_environment() {
         # 禁用 Docker Compose 的 buildx/bake 警告
         export DOCKER_BUILDKIT=0
         export COMPOSE_DOCKER_CLI_BUILD=0
+        # 完全禁用 Bake 相关功能
+        export COMPOSE_EXPERIMENTAL_BAKE=0
+        # 强制使用传统构建后端
+        export BUILDKIT_PROGRESS=plain
     fi
 }
 
@@ -450,9 +454,8 @@ build_services() {
     # 清屏并执行
     clear
 
-    # 设置Docker构建环境变量
-    export DOCKER_BUILDKIT=1
-    export COMPOSE_DOCKER_CLI_BUILD=1
+    # Docker构建环境变量已在脚本开头通过 detect_docker_environment() 检测并设置
+    # 不再强制覆盖，保持自动检测的结果
 
     # 检测网络连接，如果无法访问 Docker Hub，自动启用国内镜像源
     if [[ "${CHANGE_SOURCE:-false}" != "true" ]]; then
