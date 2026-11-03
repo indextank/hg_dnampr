@@ -1,0 +1,5 @@
+- targets:
+    - syncer-mysql-exporter:9104
+  labels:
+    service: mysql
+    stack: hg_dnmpr

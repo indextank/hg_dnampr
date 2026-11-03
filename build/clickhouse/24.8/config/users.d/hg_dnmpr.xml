@@ -1,0 +1,25 @@
+<!--
+  hg_dnmpr ClickHouse 用户覆盖层
+  ==========================================
+  声明默认管理员用户（profile = default），密码由 entrypoint 脚本运行时注入。
+  占位哈希为空字符串 SHA256（entrypoint 启动时会用 CLICKHOUSE_PASSWORD 重写）。
+-->
+<clickhouse>
+    <users>
+        <clickhouse>
+            <!-- profile 引用官方默认 profile（含合理的 max_memory_usage 等） -->
+            <profile>default</profile>
+            <!-- 网络访问：允许从任意 IP（容器网络环境） -->
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <!-- 密码哈希占位：entrypoint-init.sh 启动时用 CLICKHOUSE_PASSWORD 的 SHA256 覆盖 -->
+            <password_sha256_hex>0000000000000000000000000000000000000000000000000000000000000000</password_sha256_hex>
+            <quota>default</quota>
+            <access_management>1</access_management>
+            <named_collection_control>1</named_collection_control>
+            <show_named_collections>1</show_named_collections>
+            <show_named_collections_secrets>1</show_named_collections_secrets>
+        </clickhouse>
+    </users>
+</clickhouse>

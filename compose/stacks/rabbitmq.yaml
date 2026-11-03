@@ -1,0 +1,150 @@
+name: hg_dnmpr_rabbitmq
+
+x-common: &default-common
+    restart: unless-stopped
+    env_file:
+        - ${ENV_DIR:-../../env}/base.env
+        - ${ENV_DIR:-../../env}/rabbitmq.env
+        - ${ENV_DIR:-../../env}/canal.env
+        - ${ROOT_ENV_FILE:-../../.env}
+        - ${ENV_DIR:-../../env}/container-strip-host-proxy.env
+    dns:
+        - ${DNS_PRIMARY:-223.5.5.5}
+        - ${DNS_SECONDARY:-114.114.114.114}
+    dns_opt:
+        - use-vc
+        - timeout:2
+        - attempts:3
+    # ICMP(ping) 需要 CAP_NET_RAW，显式声明避免运行环境默认能力收紧。
+    cap_add:
+        - NET_RAW
+    logging:
+        driver: "json-file"
+        options:
+            max-size: "100m"
+            max-file: "3"
+    security_opt:
+        - no-new-privileges:true
+
+services:
+    ################   RabbitMQ  ########################
+    rabbitmq:
+        <<: *default-common
+        image: hg_dnmpr_rabbitmq:latest
+        build:
+            context: ../..
+            dockerfile: build/rabbitmq/${RABBITMQ_BUILD_VERSION:-4.2}/Dockerfile
+            args:
+                RABBITMQ_VERSION: ${RABBITMQ_VERSION:-4.2.5}
+                CHANGE_SOURCE: ${CHANGE_SOURCE:-false}
+                HTTP_PROXY: ${HTTP_PROXY:-}
+                HTTPS_PROXY: ${HTTPS_PROXY:-}
+                NO_PROXY: ${NO_PROXY:-}
+            network: host
+        container_name: rabbitmq
+        hostname: rabbitmq
+        environment:
+            TZ: ${TZ:-Asia/Shanghai}
+            RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-}
+            RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-}
+            RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_DEFAULT_VHOST:-/}
+            RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-}
+        volumes:
+            - ${RABBITMQ_DATA_PATH:-rabbitmq_data}:/var/lib/rabbitmq:rw
+            - ${RABBITMQ_LOG_DIR:-../../logs/rabbitmq}:/var/log/rabbitmq:rw
+            - ${BUILD_ROOT:-../../build}/rabbitmq/${RABBITMQ_BUILD_VERSION:-4.2}/config/20-hg-dnmpr.conf:/etc/rabbitmq/conf.d/20-hg-dnmpr.conf:ro
+        ports:
+            # AMQP 协议端口（对外服务，绑定所有地址）
+            - "${RABBITMQ_HOST_PORT:-5672}:5672"
+            # Management Web UI 端口（仅本机访问，绑定 127.0.0.1 避免外部暴露）
+            - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+            # Erlang 分布式节点通信端口（仅本机访问，绑定 127.0.0.1 避免外部暴露）
+            - "127.0.0.1:${RABBITMQ_DIST_PORT:-25672}:25672"
+        deploy:
+            resources:
+                limits:
+                    cpus: ${RABBITMQ_LIMITS_CPU:-2}
+                    memory: ${RABBITMQ_LIMITS_MEMORY:-2G}
+                reservations:
+                    memory: ${RABBITMQ_RESERVATIONS_MEMORY:-512M}
+        healthcheck:
+            test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+            interval: 30s
+            timeout: 30s
+            retries: 3
+            start_period: 60s
+        networks:
+            - lnamp_network
+
+    ################   Canal Server  ########################
+    canal-server:
+        <<: *default-common
+        image: hg_dnmpr_rabbitmq_canal-server:latest
+        build:
+            context: ../..
+            dockerfile: build/canal/Dockerfile
+            args:
+                CANAL_VERSION: ${CANAL_VERSION:-v1.1.8}
+                CHANGE_SOURCE: ${CHANGE_SOURCE:-false}
+                HTTP_PROXY: ${HTTP_PROXY:-}
+                HTTPS_PROXY: ${HTTPS_PROXY:-}
+                ALL_PROXY: ${ALL_PROXY:-}
+                NO_PROXY: ${NO_PROXY:-}
+            network: host
+        container_name: canal-server
+        hostname: canal-server
+        environment:
+            TZ: ${TZ:-Asia/Shanghai}
+            canal.admin.user: ${CANAL_ADMIN_USER:-}
+            canal.admin.passwd: ${CANAL_ADMIN_PASSWORD:-}
+            canal.destinations: ${CANAL_DESTINATIONS:-example}
+            # canal.instance.master.address 含点号，在 Linux 下不是合法环境变量名，Canal 无法读取，实际地址必须在
+            # build/canal/config/example/instance.properties 中直接修改 canal.instance.master.address
+            # canal.instance.master.address: ${CANAL_MYSQL_HOST:-mysql}:${CANAL_MYSQL_PORT:-3306}
+            canal.instance.dbUsername: ${CANAL_INSTANCE_DB_USERNAME:-}
+            canal.instance.dbPassword: ${CANAL_INSTANCE_DB_PASSWORD:-}
+            canal.serverMode: rabbitMQ
+            canal.mq.servers: ${CANAL_MQ_SERVERS:-rabbitmq}
+            # canal.mq.batchSize 仅适用于 Kafka 模式，RabbitMQ 模式无效
+            # RabbitMQ 模式下控制批次大小请使用 canal.mq.canalBatchSize（在 canal.properties 中配置）
+            canal.mq.canalBatchSize: ${CANAL_MQ_CANAL_BATCH_SIZE:-50}
+            canal.mq.canalGetTimeout: ${CANAL_MQ_CANAL_GET_TIMEOUT:-100}
+            canal.mq.vhost: ${RABBITMQ_DEFAULT_VHOST:-/}
+            canal.mq.username: ${RABBITMQ_DEFAULT_USER:-}
+            canal.mq.password: ${RABBITMQ_DEFAULT_PASS:-}
+            # Canal 1.1.8 支持通过环境变量覆盖配置，使用下划线替代点号
+            canal_mq_servers: ${CANAL_MQ_SERVERS:-rabbitmq}
+            canal_mq_vhost: ${RABBITMQ_DEFAULT_VHOST:-/}
+            canal_mq_username: ${RABBITMQ_DEFAULT_USER:-}
+            canal_mq_password: ${RABBITMQ_DEFAULT_PASS:-}
+        volumes:
+            - ${CANAL_CONFIG_PATH:-${DATA_PATH_HOST}/${CANAL_DATA_SUBDIR}/conf}:/home/admin/canal-server/conf:rw
+            - ${CANAL_LOG_PATH:-${DATA_PATH_HOST}/${CANAL_DATA_SUBDIR}/logs}:/home/admin/canal-server/logs:rw
+        ports:
+            # Canal Admin 管理端口（仅本机访问，绑定 127.0.0.1 避免外部暴露）
+            - "127.0.0.1:${CANAL_ADMIN_PORT:-11110}:11110"
+            # Canal Server TCP 端口（对外服务，绑定所有地址）
+            - "${CANAL_SERVER_PORT:-11111}:11111"
+            # Canal Metrics 监控端口（仅本机访问，绑定 127.0.0.1 避免外部暴露）
+            - "127.0.0.1:${CANAL_METRICS_PORT:-11112}:11112"
+        depends_on:
+            rabbitmq:
+                condition: service_healthy
+        deploy:
+            resources:
+                limits:
+                    cpus: ${CANAL_LIMITS_CPU:-1}
+                    memory: ${CANAL_LIMITS_MEMORY:-2G}
+                reservations:
+                    memory: ${CANAL_RESERVATIONS_MEMORY:-512M}
+        networks:
+            - lnamp_network
+
+networks:
+    lnamp_network:
+        external: true
+        name: hg_dnmpr_network
+
+volumes:
+    rabbitmq_data:
+        driver: local

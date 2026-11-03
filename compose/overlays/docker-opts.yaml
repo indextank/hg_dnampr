@@ -1,0 +1,10 @@
+# Docker 专用网络选项 override
+# 仅在 Docker 运行时下通过 -f compose/overlays/docker-opts.yaml 追加使用。
+# Podman 不支持 com.docker.network.* 这类 driver_opts，因此拆分到独立文件。
+# up.sh / build.sh 在 Docker 模式（CR_IS_DOCKER=true）时自动附加此文件。
+
+networks:
+    default:
+        driver_opts:
+            com.docker.network.enable_ipv6: "false"
+            com.docker.network.bridge.name: br-hg-dnmpr

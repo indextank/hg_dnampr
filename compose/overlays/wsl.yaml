@@ -1,0 +1,25 @@
+# ==========================================
+# WSL 环境专用 Docker Compose 配置
+# ==========================================
+# 用于解决 WSL 环境下数据库连接慢（5-10秒）的问题
+#
+# 使用方法：
+#   docker-compose -f compose/main.yaml -f compose/overlays/wsl.yaml up -d
+#
+# 或设置环境变量后直接使用：
+#   export COMPOSE_FILE=compose/main.yaml:compose/overlays/wsl.yaml
+#   docker compose up -d
+#
+# 注意：Compose 对 volumes 按「目标路径」合并覆盖，不会整表替换。
+# 因此这里只覆盖需要改的项（mysql-env → WSL 优化配置），其余沿用 databases.yaml。
+services:
+    mysql:
+        # WSL 环境同样需要足够的文件描述符
+        ulimits:
+            nofile:
+                soft: 65536
+                hard: 65536
+        volumes:
+            # 覆盖 databases.yaml 的 mount-src/mysql-env.cnf（同目标路径 → 本项胜出）
+            # 仍走 mount-src，由 entrypoint 落地为 644，避免 9p 777 触发 world-writable Warning
+            - ${BUILD_ROOT:-../build}/mysql/${MYSQL_BUILD_VERSION:-8.4}/config/conf.d/mysql-wsl.cnf:/etc/mysql/mount-src/mysql-env.cnf:ro,Z

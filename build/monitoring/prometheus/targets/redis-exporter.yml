@@ -1,0 +1,4 @@
+- targets: []
+  labels:
+    service: redis
+    stack: hg_dnmpr

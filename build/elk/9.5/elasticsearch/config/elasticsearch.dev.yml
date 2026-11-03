@@ -1,0 +1,151 @@
+# ==========================================
+# Elasticsearch 配置文件 - 开发环境
+# ==========================================
+# 适用场景：本地开发、功能验证、调试
+# 堆大小  ：2 GB（由 elk.dev.env ES_JAVA_OPTS 设定）
+# 安全模式：Security 启用，SSL 全部关闭
+#
+# 注意：xpack.security.* 的 SSL 布尔值仅为无 docker-compose 直接启动时的兜底默认值。
+# 实际运行时由 compose/stacks/elk.yaml 的 command: -E 参数注入，优先级更高。
+# ==========================================
+
+# ==========================================
+# 集群与节点
+# ==========================================
+cluster.name: "docker-cluster"
+node.name: "elasticsearch"
+
+# 单节点发现模式（避免集群相关问题）
+discovery.type: "single-node"
+discovery.seed_hosts: []
+
+# ==========================================
+# 网络
+# ==========================================
+network.host: "0.0.0.0"
+http.port: 9200
+
+# 跨域访问设置（开发环境允许所有来源）
+http.cors.enabled: true
+http.cors.allow-origin: "*"
+http.cors.allow-headers: "Authorization,X-Requested-With,Content-Length,Content-Type"
+
+# ==========================================
+# X-Pack 安全（兜底值）
+# ==========================================
+# 开发环境：Security 启用，Transport SSL 关闭，HTTP SSL 关闭
+# 真实值由 docker compose -E xpack.security.* 注入，此处仅作兜底
+xpack.security.enabled: true
+xpack.security.transport.ssl.enabled: false
+xpack.security.http.ssl.enabled: false
+
+# SSL 证书路径（仅 ssl.enabled=true 时 ES 才读取；开发环境下被忽略）
+xpack.security.transport.ssl.verification_mode: certificate
+xpack.security.transport.ssl.key: certs/elasticsearch/elasticsearch.key
+xpack.security.transport.ssl.certificate: certs/elasticsearch/elasticsearch.crt
+xpack.security.transport.ssl.certificate_authorities: ["certs/ca/ca.crt"]
+
+xpack.security.http.ssl.key: certs/elasticsearch/elasticsearch.key
+xpack.security.http.ssl.certificate: certs/elasticsearch/elasticsearch.crt
+xpack.security.http.ssl.certificate_authorities: ["certs/ca/ca.crt"]
+
+# 禁用不必要的 X-Pack 功能（减少资源占用与警告）
+xpack.security.enrollment.enabled: false
+xpack.profiling.enabled: false
+xpack.monitoring.templates.enabled: false
+xpack.ml.enabled: false
+
+# ==========================================
+# 插件与索引操作安全
+# ==========================================
+plugin.mandatory: []
+
+# 防止误操作通配符删除索引
+action.destructive_requires_name: true
+
+# 允许 ES 自动创建滚动索引（ILM rollover 需要）
+action.auto_create_index: .monitoring*,.watches,.triggered_watches,.watcher-history*,.ml*,logs-*,metrics-*,*
+
+# ==========================================
+# 内存锁定
+# ==========================================
+# 开发环境关闭内存锁，避免 ulimit 权限问题导致启动失败
+bootstrap.memory_lock: false
+
+# ==========================================
+# 日志级别（开发环境）
+# ==========================================
+logger.level: "WARN"
+
+# AWS 相关（无需 S3 时抑制）
+logger.com.amazonaws: "ERROR"
+logger.org.elasticsearch.repositories.s3: "ERROR"
+logger.org.elasticsearch.entitlement.runtime.policy.PolicyManager.repository-s3: "ERROR"
+logger.org.elasticsearch.entitlement.runtime.api: "ERROR"
+
+# 推理服务相关警告
+logger.org.elasticsearch.xpack.inference.services.elastic.authorization.ElasticInferenceServiceAuthorizationHandler: "ERROR"
+logger.org.elasticsearch.xpack.inference: "ERROR"
+
+# ES 8.19 已知 regression：entitlement 框架误拦截 x-pack-security 读取 jvm.options（不影响功能）
+logger.org.elasticsearch.entitlement.runtime.policy.PolicyManager.x-pack-security: "ERROR"
+
+# 开发环境故意关闭 Transport SSL，Bootstrap 检查产生的 WARN 属预期行为
+logger.org.elasticsearch.bootstrap.BootstrapChecks: "ERROR"
+
+# 内部索引点前缀废弃通知（ES 自身行为，无需处理）
+logger.org.elasticsearch.deprecation.validation.DotPrefixValidator: "ERROR"
+
+# Kibana 直接访问 .security-* 系统索引的废弃警告（ES 8.x 内部行为）
+logger.org.elasticsearch.deprecation.cluster.metadata.IndexNameExpressionResolver: "ERROR"
+
+# ==========================================
+# HTTP 传输
+# ==========================================
+http.compression: true
+# 开发环境适当限制请求体大小（200 MB 足够调试用）
+http.max_content_length: "200mb"
+
+# ==========================================
+# 线程池（适配 2 GB 堆，开发场景）
+# ==========================================
+# 开发环境并发写入量小，队列无需过大
+thread_pool.write.queue_size: 200
+thread_pool.search.queue_size: 500
+
+# ==========================================
+# 索引缓冲（写入性能）
+# ==========================================
+# 2 GB 堆 × 15% = 300 MB 缓冲，适合开发场景小批量写入
+indices.memory.index_buffer_size: "15%"
+indices.memory.min_index_buffer_size: "48mb"
+
+# ==========================================
+# 查询缓存
+# ==========================================
+# 2 GB 堆 × 10% = 200 MB 查询缓存
+indices.queries.cache.size: "10%"
+
+# 开发环境聚合桶上限（调试用，不需要生产环境大值）
+search.max_buckets: 10000
+
+# ==========================================
+# Fielddata 缓存
+# ==========================================
+# 2 GB 堆 × 20% = 400 MB fielddata 缓存
+indices.fielddata.cache.size: "20%"
+
+# ==========================================
+# 熔断器（防止调试期大查询 OOM）
+# ==========================================
+# total：2 GB 堆 × 85% = 1.7 GB 总熔断上限（比生产宽松，留余量给 GC）
+indices.breaker.total.limit: "85%"
+
+# request：单次请求内存上限，超出返回 429 而非 OOM
+indices.breaker.request.limit: "40%"
+
+# fielddata：与 indices.fielddata.cache.size 配合
+indices.breaker.fielddata.limit: "20%"
+
+# inflight_requests：并发网络请求总大小上限
+network.breaker.inflight_requests.limit: "50%"

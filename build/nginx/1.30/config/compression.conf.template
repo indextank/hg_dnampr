@@ -1,0 +1,25 @@
+# ==========================================
+# Nginx 压缩配置（由入口脚本根据构建选项自动生成）
+# 请勿手动编辑此文件，修改 web.env 中的压缩模块开关后重建镜像即可。
+# ==========================================
+
+#Gzip Compression（始终启用）
+gzip on;
+gzip_buffers 16 8k;
+gzip_comp_level 6;
+gzip_http_version 1.1;
+gzip_min_length 1k;
+gzip_proxied any;
+gzip_vary on;
+gzip_types
+  text/xml application/xml application/atom+xml application/rss+xml application/xhtml+xml image/svg+xml
+  text/javascript application/javascript application/x-javascript
+  text/x-json application/json application/x-web-app-manifest+json
+  text/css text/plain text/x-component
+  font/opentype application/x-font-ttf application/vnd.ms-fontobject
+  image/jpeg image/gif image/png image/x-icon;
+gzip_disable "MSIE [1-6]\.(?!.*SV1)";
+
+${NGINX_BROTLI_BLOCK}
+
+${NGINX_ZSTD_BLOCK}

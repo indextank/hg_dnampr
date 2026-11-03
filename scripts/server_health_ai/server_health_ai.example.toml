@@ -1,0 +1,72 @@
+# server_health_ai.py 示例配置文件（TOML）
+# 使用方式: server_health_ai.py --config /etc/server_health_ai.toml
+# 也支持 .json / .ini 格式；CLI 参数优先级最高。
+
+[ai.openai]
+base_url = "https://api.openai.com"
+api_key = ""                       # 留空则从环境变量 OPENAI_API_KEY 读取；都为空则跳过 AI
+model = "gpt-3.5-turbo"
+temperature = 0.2
+max_tokens = 900
+timeout_s = 30
+# system_prompt_file = "/etc/server_health_ai.prompt.txt"
+
+[ai.budget]
+max_prompt_chars = 60000           # prompt 体积上限，超出时自动丢弃 raw 字段
+
+[mysql]
+dsn = "mysql://root@localhost"     # 不允许在 DSN 中携带明文密码
+# defaults_file = "~/.my.cnf"
+# socket = "/var/run/mysqld/mysqld.sock"
+# container = "mysql8"             # 显式 docker 容器名（最高优先级）
+container_label = "mysql"
+container_image_regex = "^mysql(?::|$)"
+
+[logging]
+level = "INFO"
+# audit_path = "~/.local/state/server_health_ai/audit.log"
+no_audit = false
+
+[runtime]
+pid_file = "/tmp/server_health_ai.pid"
+command_timeout_s = 30
+parallel = true
+
+[runtime.modes]
+dry_run = false
+no_install = false
+no_net = false
+readonly = false
+
+[application]
+log_files = ["/var/log/nginx/access.log"]
+log_format = "auto"                # auto / combined / combined_with_time / 自定义命名正则
+
+[thresholds.cpu]
+yellow = 70
+red = 90
+
+[thresholds.memory]
+yellow = 75
+red = 90
+
+[thresholds.disk]
+yellow = 80
+red = 90
+
+[thresholds.iowait]
+yellow = 10
+red = 25
+
+[thresholds.http_error_rate]
+yellow = 1.0
+red = 5.0
+
+[thresholds.mysql_threads]
+yellow = 200
+red = 500
+
+[history]
+# 留空则使用 ~/.local/state/server_health_ai/history
+# dir = "/var/lib/server-health-ai/history"
+max_keep = 30

@@ -1,0 +1,64 @@
+groups:
+  - name: project-service-health
+    interval: 30s
+    rules:
+      - alert: MonitoringTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus target is down: {{ $labels.job }} / {{ $labels.instance }}"
+          description: "Prometheus has not been able to scrape {{ $labels.job }} at {{ $labels.instance }} for more than 2 minutes."
+
+      - alert: ContainerMetricsStale
+        expr: time() - container_last_seen{name!=""} > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container metrics disappeared: {{ $labels.name }}"
+          description: "cAdvisor has not seen container {{ $labels.name }} recently. Check whether it exited or was recreated."
+
+  - name: rabbitmq-core-alerts
+    interval: 30s
+    rules:
+      - alert: RabbitMQAckTimeoutLogDetected
+        expr: increase(promtail_custom_rabbitmq_ack_timeout_log_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: rabbitmq
+        annotations:
+          summary: "RabbitMQ ACK timeout log detected"
+          description: "Promtail matched RabbitMQ ACK timeout related logs in the last 5m. Open Grafana Loki logs filtered by container=rabbitmq for details."
+
+      - alert: RabbitMQQueueBacklogHigh
+        expr: max(rabbitmq_queue_messages_ready) by (queue, vhost) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: rabbitmq
+        annotations:
+          summary: "RabbitMQ queue backlog is high: {{ $labels.queue }}"
+          description: "Queue {{ $labels.vhost }}/{{ $labels.queue }} has more than 100 ready messages for 5 minutes."
+
+      - alert: RabbitMQUnackedMessagesHigh
+        expr: max(rabbitmq_queue_messages_unacked) by (queue, vhost) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: rabbitmq
+        annotations:
+          summary: "RabbitMQ unacked messages are high: {{ $labels.queue }}"
+          description: "Queue {{ $labels.vhost }}/{{ $labels.queue }} has more than 100 unacknowledged messages for 5 minutes."
+
+      - alert: MessageSyncLagHigh
+        expr: max(syncer_sync_consumer_lag) by (queue) > 1000
+        for: 5m
+        labels:
+          severity: critical
+          component: syncer
+        annotations:
+          summary: "Message sync lag is high: {{ $labels.queue }}"
+          description: "Syncer consumer lag for queue {{ $labels.queue }} has been above 1000 for 5 minutes."

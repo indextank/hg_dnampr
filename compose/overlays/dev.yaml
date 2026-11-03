@@ -1,0 +1,538 @@
+# ========================
+# 开发环境专用配置说明
+# ========================
+# 特性：
+# 1. 单副本运行，最小资源分配
+# 2. 调试工具集成（Xdebug等）
+# 3. 详细日志记录
+# 4. 本地代码热重载
+# 5. 快速迭代配置
+
+# PHP 运行时性能（开发环境）：将 env/php.env 的 PHP_DEV_* 映射为容器内统一变量名，
+# 当 ENVIRONMENT=development 选中本 overlay 时自动加载。
+# 真正写入 php.ini 的覆盖由 up.sh 生成 zz-profile-overrides.ini 并挂载到容器 conf.d。
+x-php-perf-env: &php-perf-env
+  PHP_MEMORY_LIMIT: ${PHP_DEV_MEMORY_LIMIT:-1024M}
+  PHP_MAX_EXECUTION_TIME: ${PHP_DEV_MAX_EXECUTION_TIME:-300}
+  PHP_UPLOAD_MAX_FILESIZE: ${PHP_DEV_UPLOAD_MAX_FILESIZE:-128M}
+  PHP_POST_MAX_SIZE: ${PHP_DEV_POST_MAX_SIZE:-128M}
+  PHP_MAX_INPUT_VARS: ${PHP_DEV_MAX_INPUT_VARS:-5000}
+  PHP_DISPLAY_ERRORS: ${PHP_DEV_DISPLAY_ERRORS:-On}
+  PHP_ERROR_REPORTING: ${PHP_DEV_ERROR_REPORTING:-E_ALL}
+
+services:
+  nginx:
+    extends:
+      file: stacks/web.yaml
+      service: nginx-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${NGINX_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${NGINX_DEV_RESERVATIONS_MEMORY:-64M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  tengine:
+    extends:
+      file: stacks/web.yaml
+      service: tengine-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${TENGINE_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${TENGINE_DEV_RESERVATIONS_MEMORY:-64M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  valkey:
+    extends:
+      file: stacks/databases.yaml
+      service: valkey-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${VALKEY_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${VALKEY_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  redis:
+    extends:
+      file: stacks/databases.yaml
+      service: redis-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${REDIS_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${REDIS_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  mongo:
+    extends:
+      file: stacks/databases.yaml
+      service: mongo-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${MONGO_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${MONGO_DEV_RESERVATIONS_MEMORY:-256M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  mysql:
+    extends:
+      file: stacks/databases.yaml
+      service: mysql-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${MYSQL_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${MYSQL_DEV_RESERVATIONS_MEMORY:-256M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  mysql_backup:
+    extends:
+      file: stacks/databases.yaml
+      service: mysql-backup
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${MYSQL_BACKUP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${MYSQL_BACKUP_DEV_RESERVATIONS_MEMORY:-64M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  postgres:
+    extends:
+      file: stacks/databases.yaml
+      service: postgres-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${POSTGRES_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${POSTGRES_DEV_RESERVATIONS_MEMORY:-256M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  pgadmin:
+    extends:
+      file: stacks/databases.yaml
+      service: pgadmin-server
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${PGADMIN_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PGADMIN_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  php85_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php85_apache
+    environment:
+      <<: *php-perf-env
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  php84_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php84_apache
+    environment:
+      <<: *php-perf-env
+    # ── 方案A：开发环境端口直连 ──
+    # 通过 env 变量控制端口映射，默认覆盖 Hyperf HTTP Server 集群端口段
+    # 修改 env/php.env 中 PHP84_HYPERF_PORT / PHP84_HYPERF_PORT_END 可调整端口范围
+    ports:
+      - "9901-9903:9901-9903" # Dev-only: Hyperf HTTP Server集群端口段
+    # ── 方案D：Traefik 动态路由 ──
+    # 需 Traefik 容器已加入 hg_dnmpr_network；未部署时 labels 无害，方案A 端口直连仍可用
+    labels:
+      - "traefik.http.routers.php84-hyperf.rule=Host(`${PHP84_HYPERF_SERVER_NAME:-php84-hyperf.default.com}`)"
+      - "traefik.http.services.php84-hyperf.loadbalancer.server.port=9901"
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  php83_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php83_apache
+    environment:
+      <<: *php-perf-env
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  php82_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php82_apache
+    environment:
+      <<: *php-perf-env
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    # 开发环境可以添加 Xdebug 等调试工具的环境变量或配置
+    # environment:
+    #   XDEBUG_MODE: develop,debug
+    #   XDEBUG_CONFIG: client_host=host.docker.internal client_port=9003
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  php81_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php81_apache
+    environment:
+      <<: *php-perf-env
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  php80_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php80_apache
+    environment:
+      <<: *php-perf-env
+    deploy:
+      # 开发环境保持单副本，避免资源浪避
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  php74_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php74_apache
+    environment:
+      <<: *php-perf-env
+    deploy:
+      # 开发环境保持单副本，避免资源浪费
+      # 建议值范围：1-2（本地多服务联调时可临时调整）
+      replicas: 1
+      resources:
+        limits:
+          cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+          memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+    logging:
+      # 开发日志配置（DEBUG级别）
+      # max-size - 单个日志文件最大尺寸
+      # max-file - 保留历史日志文件数量
+      driver: "json-file"
+      options:
+        max-size: "10m" # 建议值：10-50MB
+        max-file: "3" # 建议值：3-5个文件
+
+  mongo-backup:
+    extends:
+      file: stacks/databases.yaml
+      service: mongo-backup
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          cpus: "0.1"
+          memory: "128M"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres-backup:
+    extends:
+      file: stacks/databases.yaml
+      service: postgres-backup
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          cpus: "0.1"
+          memory: "128M"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  timescaledb:
+    extends:
+      file: stacks/databases.yaml
+      service: timescaledb-server
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${TIMESCALE_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${TIMESCALE_DEV_RESERVATIONS_MEMORY:-256M}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  timescaledb_backup:
+    extends:
+      file: stacks/databases.yaml
+      service: timescaledb-backup
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          cpus: "0.1"
+          memory: "128M"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  pgvector:
+    extends:
+      file: stacks/databases.yaml
+      service: pgvector-server
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${PGVECTOR_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${PGVECTOR_DEV_RESERVATIONS_MEMORY:-256M}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  pgvector_backup:
+    extends:
+      file: stacks/databases.yaml
+      service: pgvector-backup
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          cpus: "0.1"
+          memory: "128M"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  clickhouse:
+    extends:
+      file: stacks/databases.yaml
+      service: clickhouse-server
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          cpus: ${CLICKHOUSE_DEV_RESERVATIONS_CPU:-0.1}
+          memory: ${CLICKHOUSE_DEV_RESERVATIONS_MEMORY:-256M}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  clickhouse_backup:
+    extends:
+      file: stacks/databases.yaml
+      service: clickhouse-backup
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          cpus: "0.1"
+          memory: "128M"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# 可以根据需要为其他服务添加开发环境特定的覆盖配置
+# 注：volumes 统一由 compose/main.yaml 声明，overlay 不必重复（同名 driver: local 声明为幂等冗余）。

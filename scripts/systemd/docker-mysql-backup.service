@@ -1,0 +1,14 @@
+[Unit]
+Description=Run Docker MySQL backup script
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/bin/bash /data/hg_dnmpr/scripts/docker-mysql-backup.sh
+WorkingDirectory=/data/hg_dnmpr/scripts
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+#
+# php{{PHP_VERSION}} — run PHP {{PHP_DOTTED_VERSION}} from the dockerised `php{{PHP_VERSION}}_apache`
+# container as if it were a local binary.
+#
+# 由 ./build.sh 在 phpXX 镜像构建成功后，从 build/php/common/php 模板自动
+# 生成并安装到宿主机 /usr/local/bin/。如需修改请编辑模板后重新构建。
+#
+# Editors (CodeBuddy / Trae / Cursor / VS Code) invoke a PHP executable with
+# *host* paths, but the container only sees its own mount points. This wrapper
+# rewrites the host webroot prefix to the container prefix on the way in, and
+# rewrites it back on the way out, so diagnostics point at files the editor can
+# actually open.
+#
+# Host      : /data/wwwroot
+# Container : /var/www/html
+#
+set -uo pipefail
+
+CONTAINER="${PHP{{PHP_VERSION}}_CONTAINER:-php{{PHP_VERSION}}_apache}"
+HOST_ROOT="${PHP{{PHP_VERSION}}_HOST_ROOT:-/data/wwwroot}"
+CONTAINER_ROOT="${PHP{{PHP_VERSION}}_CONTAINER_ROOT:-/var/www/html}"
+
+# Fail loudly rather than silently returning "no errors" when the container is
+# down, otherwise the editor would treat broken tooling as a clean bill of health.
+if ! docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; then
+    echo "php{{PHP_VERSION}}: container '$CONTAINER' is not running (try: docker start $CONTAINER)" >&2
+    exit 127
+fi
+
+# Translate host paths to container paths, leaving flags and code untouched.
+args=()
+for arg in "$@"; do
+    case "$arg" in
+        "$HOST_ROOT"/*) args+=( "${CONTAINER_ROOT}${arg#"$HOST_ROOT"}" ) ;;
+        *)              args+=( "$arg" ) ;;
+    esac
+done
+
+# Map the working directory in when it lives under the shared webroot, so that
+# relative paths and per-project config (phpstan.neon, composer.json) resolve.
+workdir="$PWD"
+case "$workdir" in
+    "$HOST_ROOT"/*) workdir="${CONTAINER_ROOT}${workdir#"$HOST_ROOT"}" ;;
+    *)              workdir="$CONTAINER_ROOT" ;;
+esac
+
+# -i keeps STDIN usable for `php -r`/`php -a`; -T avoids requiring a TTY so the
+# wrapper works when the editor captures output through a pipe.
+docker exec -i -w "$workdir" "$CONTAINER" php "${args[@]}" 2>&1 |
+    sed "s#${CONTAINER_ROOT}#${HOST_ROOT}#g"
+
+exit "${PIPESTATUS[0]}"

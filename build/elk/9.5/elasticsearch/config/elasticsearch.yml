@@ -1,0 +1,199 @@
+# ==========================================
+# ⚠️  此文件已被拆分，请勿直接修改
+# ==========================================
+# 该文件已按环境拆分为以下两个专用配置文件：
+#
+#   开发环境 → build/elk/8.19/elasticsearch/config/elasticsearch.dev.yml
+#              （SSL 关闭、资源占用低、BootstrapChecks 警告已抑制）
+#
+#   生产环境 → build/elk/8.19/elasticsearch/config/elasticsearch.prod.yml
+#              （SSL 全开、性能调优、内存锁定启用）
+#
+# 自动选择机制：
+#   compose/stacks/elk.yaml 的 volumes 通过 ${ELASTICSEARCH_YML_FILE} 变量
+#   自动挂载对应环境的配置文件：
+#     elk.dev.env  → ELASTICSEARCH_YML_FILE=../../build/elk/8.19/elasticsearch/config/elasticsearch.dev.yml
+#     elk.prod.env → ELASTICSEARCH_YML_FILE=../../build/elk/8.19/elasticsearch/config/elasticsearch.prod.yml
+#
+# 此文件仅保留作为历史参考，以及在完全不使用 docker-compose volume 挂载时的
+# 构建镜像兜底默认值（Dockerfile 已改为 COPY elasticsearch.dev.yml）。
+# ==========================================
+#
+# Elasticsearch 单机配置文件（历史存档，勿直接修改）
+# 优化后的最小化配置
+
+# 集群设置
+cluster.name: "docker-cluster"
+node.name: "elasticsearch"
+
+# 单节点发现模式（重要：避免集群相关问题）
+discovery.type: "single-node"
+
+# 网络设置
+network.host: "0.0.0.0"
+http.port: 9200
+
+# 跨域访问设置
+http.cors.enabled: true
+http.cors.allow-origin: "*"
+http.cors.allow-headers: "Authorization,X-Requested-With,Content-Length,Content-Type"
+
+# X-Pack 安全设置
+# 注意：这三项不使用 ${VAR} 变量替换，ES 8.x 对替换语法支持不稳定。
+# 实际值由 compose/stacks/elk.yaml 的 command: -E 参数注入，优先级高于此文件。
+# 下方的值仅作为"无 docker-compose 直接启动时"的安全兜底默认值。
+#
+# 开发环境：security=true, transport_ssl=false, http_ssl=false
+# 生产环境：security=true, transport_ssl=true,  http_ssl=true
+xpack.security.enabled: true
+xpack.security.transport.ssl.enabled: false
+xpack.security.http.ssl.enabled: false
+
+# SSL证书配置（仅在ELK_TRANSPORT_SSL_ENABLED=true时Elasticsearch才会读取这些配置）
+# 当SSL被禁用时（开发环境），这些配置会被Elasticsearch忽略，无需文件存在
+xpack.security.transport.ssl.verification_mode: certificate
+xpack.security.transport.ssl.key: certs/elasticsearch/elasticsearch.key
+xpack.security.transport.ssl.certificate: certs/elasticsearch/elasticsearch.crt
+xpack.security.transport.ssl.certificate_authorities: ["certs/ca/ca.crt"]
+
+xpack.security.http.ssl.key: certs/elasticsearch/elasticsearch.key
+xpack.security.http.ssl.certificate: certs/elasticsearch/elasticsearch.crt
+xpack.security.http.ssl.certificate_authorities: ["certs/ca/ca.crt"]
+
+xpack.security.enrollment.enabled: false
+xpack.profiling.enabled: false
+xpack.monitoring.templates.enabled: false
+
+# 禁用机器学习服务（消除推理端点授权警告）
+xpack.ml.enabled: false
+
+# 插件相关设置
+plugin.mandatory: []
+
+# 生产环境禁止通配符删除索引（防止误操作删除千万级数据）
+action.destructive_requires_name: true
+
+# 日志级别设置（减少不必要的警告）
+logger.level: "WARN"
+# 特别设置AWS相关日志级别为ERROR，减少警告信息
+logger.com.amazonaws: "ERROR"
+logger.org.elasticsearch.repositories.s3: "ERROR"
+# 抑制 repository-s3 权限相关警告
+logger.org.elasticsearch.entitlement.runtime.policy.PolicyManager.repository-s3: "ERROR"
+logger.org.elasticsearch.entitlement.runtime.api: "ERROR"
+# 抑制推理服务相关警告
+logger.org.elasticsearch.xpack.inference.services.elastic.authorization.ElasticInferenceServiceAuthorizationHandler: "ERROR"
+logger.org.elasticsearch.xpack.inference: "ERROR"
+# ES 8.19 regression: entitlement 框架误拦截 x-pack-security 读取 jvm.options（已知 bug，不影响功能）
+logger.org.elasticsearch.entitlement.runtime.policy.PolicyManager.x-pack-security: "ERROR"
+# 开发环境故意关闭 Transport SSL，Bootstrap 检查产生的 WARN 属预期行为
+logger.org.elasticsearch.bootstrap.BootstrapChecks: "ERROR"
+# 内部索引点前缀废弃通知（ES 自身行为，无需处理）
+logger.org.elasticsearch.deprecation.validation.DotPrefixValidator: "ERROR"
+# Kibana 直接访问 .security-* 系统索引的废弃警告（ES 8.x 内部行为，未来版本才会强制拦截）
+logger.org.elasticsearch.deprecation.cluster.metadata.IndexNameExpressionResolver: "ERROR"
+
+# 内存锁定（通过ulimits设置）
+# 生产环境锁定堆内存，防止 ES 堆被 swap 到磁盘（需容器 ulimit memlock=-1）
+# compose/stacks/elk.yaml 中已配置 ulimits.memlock: -1，可安全启用
+bootstrap.memory_lock: true
+
+# 绕过Bootstrap Checks（开发环境配置）
+# 允许在禁用SSL的情况下启用安全功能
+discovery.seed_hosts: []
+
+# 线程池设置（5000 万级写入 + 多索引并发查询调优）
+# write 队列：5000 万级高峰写入时扩大至 2000，防队列溢出拒绝请求（429）
+thread_pool.write.queue_size: 2000
+# search 队列：多个大索引并发聚合时扩大至 3000
+thread_pool.search.queue_size: 3000
+
+# ==========================================
+# 索引缓冲（写入性能）
+# ==========================================
+# index_buffer_size：所有 shard 共享的写入缓冲区，占堆比例
+#   16 GB 堆 × 20% = 3.2 GB 缓冲，覆盖 5000 万级大批量日志写入洪峰
+indices.memory.index_buffer_size: "20%"
+# min_index_buffer_size：单个 shard 最小缓冲，提升小 shard 写入效率
+indices.memory.min_index_buffer_size: "300mb"
+
+# ==========================================
+# 查询缓存（查询性能）
+# ==========================================
+# 每个 shard 的过滤器查询结果缓存
+# 5000 万级重复时间范围/状态过滤查询命中率高，收益显著
+# 16 GB 堆 × 15% = 2.4 GB 查询缓存
+indices.queries.cache.size: "15%"
+
+# 限制单次聚合返回的最大桶数（默认 65536）
+# 5000 万文档的 terms/date_histogram 聚合可能产生大量桶，
+# 超出此值时 ES 返回错误而非 OOM，保护堆稳定性。
+# 按实际业务调整，避免盲目设为极大值。
+search.max_buckets: 100000
+
+# ==========================================
+# Fielddata 缓存（聚合性能）
+# ==========================================
+# 对 text/analyzed 字段做聚合时使用
+# 16 GB 堆 × 30% = 4.8 GB fielddata 缓存
+# 足以容纳 5000 万文档的大型 terms/date_histogram 聚合结果
+indices.fielddata.cache.size: "30%"
+
+# ==========================================
+# 熔断器（防止大查询/聚合 OOM）
+# ==========================================
+# 千万级场景下，单次大聚合可能消耗数 GB 内存，熔断器是最后防线
+#
+# total：所有内存使用的总上限
+#   16 GB 堆 × 80% = 12.8 GB 总熔断上限
+#   比默认 95% 保守，为 G1GC 元数据和 Direct Buffer 留出余量
+indices.breaker.total.limit: "80%"
+#
+# request：单次请求（聚合、bulk 响应）可用内存上限
+#   16 GB 堆 × 40% = 6.4 GB，5000 万文档复杂聚合通常 1-3 GB，有充足余量
+#   超出时返回 429 而非 OOM，是最重要的稳定性保障
+indices.breaker.request.limit: "40%"
+#
+# fielddata：fielddata 缓存上限，与 indices.fielddata.cache.size 配合
+#   超出时驱逐最久未使用的缓存条目，而非 OOM
+indices.breaker.fielddata.limit: "30%"
+#
+# inflight_requests：正在传输的网络请求总大小上限
+#   防止大量并发大请求同时占用内存
+#   注意：此设置属于 network 命名空间，非 indices
+network.breaker.inflight_requests.limit: "50%"
+
+# ==========================================
+# HTTP 传输优化
+# ==========================================
+# 启用 HTTP 压缩，减少 Kibana↔ES 之间的聚合结果传输量
+# 5000 万文档的聚合响应体可达数十 MB，压缩后节省带宽
+http.compression: true
+# 允许更大的 Bulk 请求体（默认 100mb），支持大批量日志写入
+http.max_content_length: "500mb"
+
+# ==========================================
+# ILM / 索引生命周期管理（5000 万级增长型索引必备）
+# ==========================================
+# 以下为 ES 配置层面的支持项，具体 ILM 策略通过 Kibana 或 API 配置。
+#
+# 允许 ES 自动创建以日期为后缀的滚动索引（如 logs-2025.03.24-000001）
+# ILM rollover 需要此设置
+action.auto_create_index: .monitoring*,.watches,.triggered_watches,.watcher-history*,.ml*,logs-*,metrics-*,*
+
+# 慢查询日志阈值（index 级别设置，不可在 elasticsearch.yml 中配置）
+# 自 ES 5.x 起，index.* 设置必须通过 API 或索引模板设置，写在此处会导致启动失败。
+#
+# 在 ES 启动后通过以下 API 为全部现有索引设置阈值：
+#   curl -XPUT 'http://localhost:9200/_all/_settings' \
+#     -H 'Content-Type: application/json' \
+#     -d '{"index.search.slowlog.threshold.query.warn":"10s",
+#          "index.search.slowlog.threshold.query.info":"5s",
+#          "index.search.slowlog.threshold.fetch.warn":"1s",
+#          "index.search.slowlog.threshold.index.warn":"10s"}'
+#
+# 若需对新索引自动生效，在 Kibana → Stack Management → Index Templates 中
+# 将上述 settings 添加到对应模板的 Settings 区块。
+
+# 禁用不必要的功能来提升性能
+# bootstrap.system_call_filter: false

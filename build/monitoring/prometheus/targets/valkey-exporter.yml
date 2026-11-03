@@ -1,0 +1,5 @@
+- targets:
+    - syncer-valkey-exporter:9121
+  labels:
+    service: valkey
+    stack: hg_dnmpr

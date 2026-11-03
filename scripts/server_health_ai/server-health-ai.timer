@@ -1,0 +1,15 @@
+[Unit]
+Description=Run server-health-ai inspection periodically
+Documentation=file:%E/server_health_ai.README.md
+
+[Timer]
+# 每 30 分钟运行一次，启动后 2 分钟先跑一次。
+OnBootSec=2min
+OnUnitActiveSec=30min
+AccuracySec=30s
+RandomizedDelaySec=60s
+Persistent=true
+Unit=server-health-ai.service
+
+[Install]
+WantedBy=timers.target

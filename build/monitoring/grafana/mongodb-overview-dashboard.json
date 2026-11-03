@@ -1,0 +1,121 @@
+{
+  "id": null,
+  "uid": "mongodb-overview",
+  "title": "MongoDB 监控总览",
+  "tags": [
+    "mongodb",
+    "monitoring"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "editable": false,
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "MongoDB 存活状态",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "up{job=\"mongo-exporter\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "每秒操作数",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(mongodb_op_counters_total[5m])) by (type)",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "连接数",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "mongodb_connections{state=\"current\"}",
+          "legendFormat": "current",
+          "refId": "A"
+        },
+        {
+          "expr": "mongodb_connections{state=\"available\"}",
+          "legendFormat": "available",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "内存使用",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "mongodb_memory{type=\"resident\"}",
+          "legendFormat": "resident_mb",
+          "refId": "A"
+        },
+        {
+          "expr": "mongodb_memory{type=\"virtual\"}",
+          "legendFormat": "virtual_mb",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "网络 IO",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "rate(mongodb_network_bytes_total{state=\"in\"}[5m])",
+          "legendFormat": "bytes_in/s",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(mongodb_network_bytes_total{state=\"out\"}[5m])",
+          "legendFormat": "bytes_out/s",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}

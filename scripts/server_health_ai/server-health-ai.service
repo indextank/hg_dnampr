@@ -1,0 +1,42 @@
+[Unit]
+Description=Server Health AI inspection (one-shot)
+Documentation=file:%E/server_health_ai.README.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathIsDirectory=/proc
+
+[Service]
+Type=oneshot
+# 建议以普通用户运行；若需要 iftop/nethogs 才提升至 root。
+# User=server-health
+# Group=server-health
+WorkingDirectory=/var/lib/server-health-ai
+ExecStart=/usr/bin/env python3 /opt/server_health_ai/server_health_ai.py \
+    --config /etc/server_health_ai.toml \
+    -t 60 \
+    --history-dir /var/lib/server-health-ai/history \
+    -r /var/lib/server-health-ai/latest.md \
+    --json-out /var/lib/server-health-ai/latest.json
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+# 安全加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+ReadWritePaths=/var/lib/server-health-ai
+StateDirectory=server-health-ai
+
+# 超时控制
+TimeoutStartSec=20min
+
+[Install]
+WantedBy=multi-user.target

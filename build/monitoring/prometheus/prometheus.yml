@@ -1,0 +1,152 @@
+# Prometheus scrape configuration for go-mysql-sync-es monitoring stack.
+#
+# Service topology (all containers share hg_dnmpr_network):
+#   syncer      :8080  – the sync service itself  (/metrics, /health, /ready)
+#   prometheus  :9090  – this process
+#   grafana     :3000  – dashboard UI
+#
+# To override the scrape target when running outside Docker (e.g. bare-metal),
+# set the environment variable SYNCER_HOST before starting the stack:
+#   SYNCER_HOST=192.168.1.10:8080 docker compose -f compose/stacks/monitoring.yaml up
+
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  scrape_timeout:      10s
+
+  external_labels:
+    monitor: 'syncer-monitor'
+    env:     'docker'
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - syncer-alertmanager:9093
+
+scrape_configs:
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['syncer-alertmanager:9093']
+
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['syncer-grafana:3000']
+
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['syncer-loki:3100']
+
+  - job_name: 'promtail'
+    static_configs:
+      - targets: ['syncer-promtail:9080']
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['syncer-cadvisor:8080']
+
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['syncer-node-exporter:9100']
+
+  - job_name: 'syncer'
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/syncer.yml
+        refresh_interval: 30s
+    metrics_path: /metrics
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: '^(syncer_|go_|process_).*'
+        action: keep
+
+  - job_name: 'mysql-exporter'
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/mysql-exporter.yml
+        refresh_interval: 30s
+
+  - job_name: 'mongo-exporter'
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/mongo-exporter.yml
+        refresh_interval: 30s
+
+  - job_name: 'postgres-exporter'
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/postgres-exporter.yml
+        refresh_interval: 30s
+
+  - job_name: 'redis-exporter'
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/redis-exporter.yml
+        refresh_interval: 30s
+
+  - job_name: 'valkey-exporter'
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/valkey-exporter.yml
+        refresh_interval: 30s
+
+  - job_name: 'nginx-exporter'
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/nginx-exporter.yml
+        refresh_interval: 30s
+
+  - job_name: 'tengine-exporter'
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/tengine-exporter.yml
+        refresh_interval: 30s
+
+  - job_name: 'rabbitmq'
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/rabbitmq.yml
+        refresh_interval: 30s
+
+  - job_name: 'timescaledb-exporter'
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/timescaledb-exporter.yml
+        refresh_interval: 30s
+
+  - job_name: 'pgvector-exporter'
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/pgvector-exporter.yml
+        refresh_interval: 30s
+
+  - job_name: 'clickhouse'
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/clickhouse.yml
+        refresh_interval: 30s
+
+  - job_name: 'blackbox-http'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/blackbox-http.yml
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: syncer-blackbox-exporter:9115

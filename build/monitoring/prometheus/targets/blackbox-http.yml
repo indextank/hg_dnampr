@@ -1,0 +1,8 @@
+- targets:
+    - http://syncer:8080/health
+    - http://nginx/nginx_status
+    - http://syncer-prometheus:9090/-/ready
+    - http://syncer-grafana:3000/api/health
+  labels:
+    probe: http_2xx
+    stack: hg_dnmpr

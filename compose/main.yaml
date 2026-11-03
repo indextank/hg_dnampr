@@ -1,0 +1,194 @@
+name: hg_dnmpr
+
+x-common-variables: &default-common
+  restart: unless-stopped
+  env_file:
+    - ${ENV_DIR:-../env}/base.env
+    - ${ENV_DIR:-../env}/web.env
+    - ${ENV_DIR:-../env}/php.env
+    - ${ENV_DIR:-../env}/mysql.env
+    - ${ENV_DIR:-../env}/postgres.env
+    - ${ENV_DIR:-../env}/mongodb.env
+    - ${ENV_DIR:-../env}/redis.env
+    - ${ENV_DIR:-../env}/timescaledb.env
+    - ${ENV_DIR:-../env}/pgvector.env
+    - ${ENV_DIR:-../env}/clickhouse.env
+    - ${ROOT_ENV_FILE:-../.env}
+    - ${ENV_DIR:-../env}/container-strip-host-proxy.env
+  dns:
+    - ${DNS_PRIMARY:-223.5.5.5}
+    - ${DNS_SECONDARY:-114.114.114.114}
+  dns_opt:
+    - use-vc
+    - timeout:2
+    - attempts:3
+  # ICMP(ping) 需要 CAP_NET_RAW，显式声明避免运行环境默认能力收紧。
+  cap_add:
+    - NET_RAW
+
+services:
+  ################   nginx  ########################
+  nginx:
+    extends:
+      file: stacks/web.yaml
+      service: nginx-server
+
+  tengine:
+    extends:
+      file: stacks/web.yaml
+      service: tengine-server
+
+  ################   valkey  ########################
+  valkey:
+    extends:
+      file: stacks/databases.yaml
+      service: valkey-server
+    # 禁止提权（入口脚本用 setpriv 降权，不依赖 setuid）。
+    # 须在此声明而非 stacks/databases.yaml：overlays 同样 extends 该服务，列表合并会重复导致校验失败
+    security_opt:
+      - no-new-privileges:true
+    # extends 不继承 networks.default.aliases，需在此显式声明
+    networks:
+      default:
+        aliases:
+          - redis
+          - valkey
+
+  ################   redis  ########################
+  redis:
+    extends:
+      file: stacks/databases.yaml
+      service: redis-server
+    # 同 valkey：禁止提权，须在此而非 stacks/databases.yaml 声明
+    security_opt:
+      - no-new-privileges:true
+
+  ################   mongo  ########################
+  mongo:
+    extends:
+      file: stacks/databases.yaml
+      service: mongo-server
+
+  ################  MySQL ########################
+  mysql:
+    extends:
+      file: stacks/databases.yaml
+      service: mysql-server
+    # 禁止提权（gosu 降权不依赖 setuid 位；非 root ping 依赖 ping_group_range 而非文件能力）
+    security_opt:
+      - no-new-privileges:true
+  mysql_backup:
+    extends:
+      file: stacks/databases.yaml
+      service: mysql-backup
+
+  ################   postgres  ########################
+  postgres:
+    extends:
+      file: stacks/databases.yaml
+      service: postgres-server
+
+  pgadmin:
+    extends:
+      file: stacks/databases.yaml
+      service: pgadmin-server
+
+  ################   timescaledb  ########################
+  timescaledb:
+    extends:
+      file: stacks/databases.yaml
+      service: timescaledb-server
+  timescaledb_backup:
+    extends:
+      file: stacks/databases.yaml
+      service: timescaledb-backup
+
+  ################   pgvector  ########################
+  pgvector:
+    extends:
+      file: stacks/databases.yaml
+      service: pgvector-server
+  pgvector_backup:
+    extends:
+      file: stacks/databases.yaml
+      service: pgvector-backup
+
+  ################   clickhouse  ########################
+  clickhouse:
+    extends:
+      file: stacks/databases.yaml
+      service: clickhouse-server
+  clickhouse_backup:
+    extends:
+      file: stacks/databases.yaml
+      service: clickhouse-backup
+
+  ################  PHP ########################
+  php85_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php85_apache
+
+  php84_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php84_apache
+
+  php83_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php83_apache
+
+  php82_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php82_apache
+
+  php81_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php81_apache
+
+  php80_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php80_apache
+
+  php74_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php74_apache
+
+networks:
+  default:
+    external: true
+    name: hg_dnmpr_network
+
+volumes:
+  mysql_data:
+    driver: local
+  pgadmin:
+    driver: local
+  php_sessions:
+    driver: local
+  # PostgreSQL数据卷（postgres服务需要）
+  postgres_data:
+    driver: local
+  # MongoDB数据卷（mongo服务需要）
+  mongo_data:
+    driver: local
+  # Redis 数据卷（AOF + RDB 持久化文件）
+  redis_data:
+    driver: local
+  # Valkey 数据卷（与 Redis 同结构）
+  valkey_data:
+    driver: local
+  # TimescaleDB 数据卷
+  timescaledb_data:
+    driver: local
+  # pgvector 数据卷
+  pgvector_data:
+    driver: local
+  # ClickHouse 数据卷
+  clickhouse_data:
+    driver: local

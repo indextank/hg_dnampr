@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# ==========================================
+# Project path registry
+# ==========================================
+_PROJECT_PATHS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export PROJECT_ROOT="${PROJECT_ROOT:-$_PROJECT_PATHS_DIR}"
+export PROJECT_DIR="${PROJECT_DIR:-$PROJECT_ROOT}"
+export BUILD_ROOT="${BUILD_ROOT:-$PROJECT_ROOT/build}"
+export ENV_DIR="${ENV_DIR:-$PROJECT_ROOT/env}"
+export COMPOSE_DIR="${COMPOSE_DIR:-$PROJECT_ROOT/compose}"
+export COMPOSE_STACKS_DIR="${COMPOSE_STACKS_DIR:-$COMPOSE_DIR/stacks}"
+export COMPOSE_OVERLAYS_DIR="${COMPOSE_OVERLAYS_DIR:-$COMPOSE_DIR/overlays}"
+export ROOT_ENV_FILE="${ROOT_ENV_FILE:-$PROJECT_ROOT/.env}"
+export ROOT_ENV_LOCAL_FILE="${ROOT_ENV_LOCAL_FILE:-$PROJECT_ROOT/.env.local}"
+
+# 项目内相对路径变量名清单（单一数据源）。
+# 这些变量在 env/*.env 中以 ../../ 或 ./ 相对路径声明，运行期由
+# env_loader.sh::_normalize_project_relative_env_paths 统一规范化为绝对路径，
+# 供 shell 侧检查/生成文件使用；Compose 仍按 env_file 的相对路径解析。
+# 新增需规范化的路径变量只在此处追加一项。
+HG_PROJECT_PATH_VARS=(
+    MYSQL_CONF_FILE MYSQL_ENV_CONFIG_FILE MYSQL_LOG_DIR
+    NGINX_CONF_FILE NGINX_VHOST_DIR NGINX_LOG_DIR NGINX_MIME_TYPES_FILE
+    TENGINE_CONF_FILE
+    APACHE_LOG_DIR APACHE_VHOST_DIR
+    PHP74_PHP_CONF_FILE PHP80_PHP_CONF_FILE PHP81_PHP_CONF_FILE
+    PHP82_PHP_CONF_FILE PHP83_PHP_CONF_FILE PHP84_PHP_CONF_FILE PHP85_PHP_CONF_FILE
+    REDIS_CONF_FILE REDIS_LOG_DIR VALKEY_DATA_DIR REDIS_DATA_DIR
+    ELASTICSEARCH_YML_FILE ELASTICSEARCH_CONF_DIR KIBANA_CONF_DIR
+    LOGSTASH_CONF_DIR LOGSTASH_PIPELINE_CONF_DIR RABBITMQ_LOG_DIR
+    ELASTICSEARCH_DATA_PATH ELASTICSEARCH_LOG_DIR
+)

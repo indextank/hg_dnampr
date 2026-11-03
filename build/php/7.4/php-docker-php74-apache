@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Proxy to PHP inside Docker for Cursor/VS Code. Syntax check (php -l) only works if
+# workspace paths are mounted at the same location inside container php74_apache.
+set -euo pipefail
+
+# Handle temp files and extension files by copying to container-accessible location
+args=("$@")
+for i in "${!args[@]}"; do
+    if [[ "${args[$i]}" == /tmp/temp-* ]] || [[ "${args[$i]}" == /home/euper/.windsurf/extensions/* ]]; then
+        # Create temp directory in /data/wwwroot (container-accessible location)
+        mkdir -p /data/wwwroot/tmp
+        # Copy file to container-accessible location
+        cp "${args[$i]}" "/data/wwwroot/tmp/$(basename ${args[$i]})"
+        # Replace argument with container path
+        args[$i]="/var/www/html/tmp/$(basename ${args[$i]})"
+    elif [[ "${args[$i]}" == /* ]]; then
+        # Convert absolute paths from /data/wwwroot to /var/www/html
+        args[$i]="${args[$i]/\/data/\/wwwroot/\/var\/www\/html}"
+    fi
+done
+
+exec docker exec -i php74_apache php "${args[@]}"

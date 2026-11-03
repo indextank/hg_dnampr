@@ -1,0 +1,4 @@
+- targets: []
+  labels:
+    service: tengine
+    stack: hg_dnmpr

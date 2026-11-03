@@ -1,0 +1,48 @@
+# server_health_ai 独立项目的 lint/类型检查配置。
+# 用法:
+#   ruff check server_health_ai.py test_server_health_ai.py
+#   mypy server_health_ai.py
+# 该 pyproject.toml 仅作用于当前目录，不影响主项目其它子目录。
+
+[project]
+name = "server-health-ai"
+version = "0.2.0"
+description = "Standalone server health inspection with AI-assisted diagnosis."
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 140
+target-version = "py310"
+extend-exclude = ["logs"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",       # pyflakes / pycodestyle
+    "I",                  # import order
+    "B",                  # bugbear
+    "UP",                 # pyupgrade
+    "SIM",                # simplify
+    "PL",                 # pylint subset
+]
+ignore = [
+    "E501",               # 行长由 line-length 控制
+    "PLR0911", "PLR0912", "PLR0913", "PLR0915",
+    "PLR2004",            # magic value（阈值常量很多，单独放配置后再收）
+    "B008",               # 默认参数中调用（dataclasses.field 等场景常见）
+    "SIM108",             # ternary
+]
+
+[tool.ruff.lint.per-file-ignores]
+"test_server_health_ai.py" = ["E402", "PLR2004"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["server_health_ai.py"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+strict_optional = true
+check_untyped_defs = true
+warn_return_any = false
+disallow_untyped_defs = false

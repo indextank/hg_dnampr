@@ -1,0 +1,36 @@
+<!--
+  hg_dnmpr ClickHouse 配置覆盖层
+  ==========================================
+  官方镜像 entrypoint 会合并 config.d/*.xml 到主配置，同名节点覆盖。
+  本文件仅声明与官方默认不同的增量项，避免整体替换导致脱节。
+-->
+<clickhouse>
+    <!-- 监听所有网卡，允许容器网络访问；官方默认 listen_host 仅本地 -->
+    <listen_host>0.0.0.0</listen_host>
+    <listen_try>1</listen_try>
+
+    <!-- 时区：由 env TZ 注入，此处作为镜像默认值兜底 -->
+    <timezone>Asia/Shanghai</timezone>
+
+    <!-- 内存上限：留 10% 给系统，避免 OOM Kill 整个容器 -->
+    <max_server_memory_usage_to_ram_ratio>0.9</max_server_memory_usage_to_ram_ratio>
+
+    <!-- Prometheus metrics 端点（端口 9362），由监控栈采集 -->
+    <prometheus>
+        <endpoint>/metrics</endpoint>
+        <port>9362</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+        <status_info>true</status_info>
+    </prometheus>
+
+    <!-- 日志输出到文件（官方默认），由 volume 映射到宿主机 -->
+    <logger>
+        <level>information</level>
+        <log>/var/log/clickhouse-server/clickhouse-server.log</log>
+        <errorlog>/var/log/clickhouse-server/clickhouse-server.err.log</errorlog>
+        <size>100M</size>
+        <count>5</count>
+    </logger>
+</clickhouse>

@@ -1,0 +1,4 @@
+- targets: []
+  labels:
+    service: postgres
+    stack: hg_dnmpr

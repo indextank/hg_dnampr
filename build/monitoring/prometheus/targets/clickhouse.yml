@@ -1,0 +1,5 @@
+- targets:
+    - clickhouse:9362
+  labels:
+    service: clickhouse
+    stack: hg_dnmpr

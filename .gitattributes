@@ -1,0 +1,11 @@
+# 进入容器使用的脚本与配置统一以 LF 检出，避免 Windows 下 CRLF 导致 shell / cnf / yaml 解析异常
+*.sh     text eol=lf
+*.bash   text eol=lf
+*.envsh  text eol=lf
+*.env    text eol=lf
+*.cnf    text eol=lf
+*.conf   text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.properties text eol=lf
+Dockerfile*  text eol=lf

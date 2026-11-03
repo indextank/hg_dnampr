@@ -1,0 +1,50 @@
+# 通用构建上下文排除规则
+# 排除不需要进入构建上下文的文件，减少构建体积
+
+# 敏感文件：运行时经 env_file / --env-file 注入或挂载，禁止进入构建上下文
+.env
+.env.*
+# ELK 证书私钥的排除规则见文件末尾（须位于 !build/** 之后才生效）
+
+# 日志与临时文件
+logs/
+*.log
+*.tmp
+*.bak
+*.bak.*
+
+# 运行时配置与数据（不参与镜像构建）
+config/
+configs/
+# conf/ 目录部分服务构建需要（nginx.conf、mime.types 等），不能全排除
+# vhost/ 目录 nginx 构建需要 certs/，不能全排除
+snapshot/
+scripts/
+docs/
+
+# 管理脚本（只排除根目录的 .sh，build/ 子目录中的脚本构建需要）
+/*.sh
+!build/**
+!include/shell/download-helper.sh
+
+# compose 文件
+docker-compose*.yaml
+compose_*.yaml
+
+# 其他无关文件
+.git/
+.gitignore
+LICENSE
+*.py
+*.md
+docker-allip/
+
+# src/ 下的大型源码包（不需要进入构建上下文）
+# 注：src/mongo/server-8.0.asc 和 src/mongo/js-yaml-*.tgz 保留（Dockerfile 需要）
+src/mongo/*.tar.gz
+src/php/
+src/mysql/*.tar.gz
+
+# ELK 证书与私钥仅运行时只读挂载（compose/stacks/elk.yaml），不进入构建上下文。
+# .dockerignore 以最后匹配的规则为准，必须放在 !build/** 之后。
+build/elk/*/elasticsearch/config/certs

@@ -1,0 +1,14 @@
+api.http.host: 0.0.0.0
+config.reload.automatic: true
+config.reload.interval: 3s
+log.level: warn
+node.name: logstash
+pipeline.batch.delay: 50
+pipeline.batch.size: 125
+pipeline.buffer.type: heap
+pipeline.workers: 2
+queue.max_events: 1000
+queue.type: memory
+xpack.monitoring.elasticsearch.hosts:
+- ${ELASTICSEARCH_PROTOCOL:http}://elasticsearch:9200
+xpack.monitoring.enabled: false

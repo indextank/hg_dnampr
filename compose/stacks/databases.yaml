@@ -1,0 +1,650 @@
+x-healthcheck: &default-healthcheck
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 30s
+
+x-common-variables: &default-common
+    restart: unless-stopped # 更稳定的重启策略
+    env_file:
+        - ${ENV_DIR:-../../env}/base.env
+        - ${ENV_DIR:-../../env}/web.env
+        - ${ENV_DIR:-../../env}/php.env
+        - ${ENV_DIR:-../../env}/mysql.env
+        - ${ENV_DIR:-../../env}/postgres.env
+        - ${ENV_DIR:-../../env}/mongodb.env
+        - ${ENV_DIR:-../../env}/db_backup.env
+        - ${ENV_DIR:-../../env}/redis.env
+        - ${ENV_DIR:-../../env}/timescaledb.env
+        - ${ENV_DIR:-../../env}/pgvector.env
+        - ${ENV_DIR:-../../env}/clickhouse.env
+        - ${ROOT_ENV_FILE:-../../.env}
+        - ${ENV_DIR:-../../env}/container-strip-host-proxy.env
+    dns:
+        - ${DNS_PRIMARY:-223.5.5.5}
+        - ${DNS_SECONDARY:-114.114.114.114}
+    # 部分 nft/防火墙对 UDP/53 forward 更严；use-vc 改走 TCP/53，利于 127.0.0.11 上游解析
+    dns_opt:
+        - use-vc
+        - timeout:2
+        - attempts:3
+    # ICMP(ping) 需要 CAP_NET_RAW，显式声明避免运行环境默认能力收紧。
+    cap_add:
+        - NET_RAW
+    # 默认日志轮转，防止 json 日志无限增长（overlays 中的 logging 会覆盖此处）
+    logging:
+        driver: "json-file"
+        options:
+            max-size: "50m"
+            max-file: "3"
+
+services:
+    ################  valkey - redis衍生版 ########################
+    valkey-server:
+        <<: *default-common
+        container_name: valkey
+        image: hg_dnmpr_valkey:latest
+        build:
+            context: ../..
+            dockerfile: build/valkey/${VALKEY_BUILD_VERSION:-8.1}/Dockerfile
+            args:
+                ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                # VALKEY_VERSION 由 derive_valkey_build_ver 按 VALKEY_BUILD_VERSION 解析
+                VALKEY_VERSION: ${VALKEY_VERSION:-}
+                HTTP_PROXY: ${HTTP_PROXY:-}
+                HTTPS_PROXY: ${HTTPS_PROXY:-}
+                NO_PROXY: ${NO_PROXY}
+            network: host # 使用主机网络解决DNS问题
+        ports:
+            - "${REDIS_BIND_HOST:-127.0.0.1}:${REDIS_HOST_PORT}:6379"
+        environment:
+            SET_CONTAINER_TIMEZONE: "true"
+            CONTAINER_TIMEZONE: ${TZ}
+        volumes:
+            - ${REDIS_CONF_FILE}:/etc/redis.conf:ro
+            - ${REDIS_LOG_DIR}:/var/log/redis/:rw
+            - ${VALKEY_DATA_DIR:-valkey_data}:/data:rw
+        # 保留镜像 ENTRYPOINT（docker-entrypoint.sh 负责 setpriv 降权为 valkey 用户）；
+        # 口令来自 .env 的 REDIS_PASSWORD（经 env_file 注入），在容器内展开，不写入配置文件；
+        # 未设置时仅本容器拒绝启动（fail-closed），不影响其它服务的 compose 解析。
+        command:
+            - sh
+            - -c
+            - ': "$${REDIS_PASSWORD:?REDIS_PASSWORD 未设置，请在 .env 中配置}"; exec /usr/local/bin/docker-entrypoint.sh valkey-server /etc/redis.conf --requirepass "$$REDIS_PASSWORD"'
+        healthcheck:
+            <<: *default-healthcheck
+            test: ["CMD-SHELL", "valkey-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+        deploy:
+            resources:
+                limits:
+                    cpus: ${REDIS_LIMITS_CPU}
+                    memory: ${REDIS_LIMITS_MEMORY}
+                reservations:
+                    memory: ${REDIS_RESERVATIONS_MEMORY}
+        restart: unless-stopped # 或 always
+        networks:
+            default:
+                aliases:
+                    - redis # 添加redis别名，支持使用redis或valkey作为服务名
+                    - valkey
+        # sysctls:
+        #   - net.core.somaxconn=1024
+
+    ################  redis ########################
+    redis-server:
+        <<: *default-common
+        container_name: redis
+        image: hg_dnmpr_redis:latest
+        build:
+            context: ../..
+            dockerfile: build/redis/${REDIS_BUILD_VERSION:-8.10}/Dockerfile
+            args:
+                ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                # REDIS_VERSION 由 derive_redis_build_ver 按 REDIS_BUILD_VERSION 解析
+                REDIS_VERSION: ${REDIS_VERSION:-}
+                HTTP_PROXY: ${HTTP_PROXY:-}
+                HTTPS_PROXY: ${HTTPS_PROXY:-}
+                NO_PROXY: ${NO_PROXY}
+            network: host # 使用主机网络解决DNS问题
+        ports:
+            - "${REDIS_BIND_HOST:-127.0.0.1}:${REDIS_HOST_PORT:-6379}:6379"
+        environment:
+            SET_CONTAINER_TIMEZONE: "true"
+            CONTAINER_TIMEZONE: ${TZ:-Asia/Shanghai}
+        volumes:
+            - ${REDIS_CONF_FILE:-../../build/redis/8.10/redis.conf}:/etc/redis.conf:ro
+            - ${REDIS_LOG_DIR:-../../logs/redis}:/var/log/redis/:rw
+            - ${REDIS_DATA_DIR:-redis_data}:/data:rw
+        # 保留镜像 ENTRYPOINT（docker-entrypoint.sh 负责 setpriv 降权为 redis 用户）；
+        # 口令来自 .env 的 REDIS_PASSWORD（经 env_file 注入），在容器内展开，不写入配置文件；
+        # 未设置时仅本容器拒绝启动（fail-closed）。
+        # 应急回退为 root 运行：env/redis.env 设置 SKIP_DROP_PRIVS=1（不建议长期使用）。
+        command:
+            - sh
+            - -c
+            - ': "$${REDIS_PASSWORD:?REDIS_PASSWORD 未设置，请在 .env 中配置}"; exec /usr/local/bin/docker-entrypoint.sh redis-server /etc/redis.conf --requirepass "$$REDIS_PASSWORD"'
+        deploy:
+            resources:
+                limits:
+                    cpus: ${REDIS_LIMITS_CPU:-0.5}
+                    memory: ${REDIS_LIMITS_MEMORY:-512M}
+                reservations:
+                    memory: ${REDIS_RESERVATIONS_MEMORY:-256M}
+        healthcheck:
+            <<: *default-healthcheck
+            # REDISCLI_AUTH 避免口令出现在进程参数中
+            test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+        networks:
+            - default
+        # sysctls:
+        #   - net.core.somaxconn=1024
+
+    ################  MySQL ########################
+    # 采用官方二进制安装包安装，根据需要选择安装指定版本的mysql;
+    # 可有效避免docker仓库通过apt直接安装,因网络问题key无法下载问题。
+    # 缺点：采用该方式，会导致images文件大小会偏大一点
+    #
+    mysql-server:
+        <<: *default-common
+        container_name: mysql
+        image: hg_dnmpr_mysql:latest
+        # ICMP(ping) 需要 CAP_NET_RAW，显式声明避免某些环境默认能力收紧
+        cap_add:
+            - NET_RAW
+        # 非 root 使用 ping：依赖 ICMP ping socket，需 GID 落在 ping_group_range 内（exec 进库后 ping 不报 Operation not permitted）
+        sysctls:
+            - net.ipv4.ping_group_range=0 2147483647
+        # security_opt: # docker安全验证
+        #   - seccomp:unconfined
+        # no-new-privileges 在 compose/main.yaml 中声明（此处声明会在 main + overlays 双重 extends 时重复而校验失败）
+        # 文件描述符限制：MySQL 生产环境需要大量文件描述符
+        # table_open_cache=8000 时，每张表需要多个 fd（data + index），系统默认 1024 远不够
+        # 建议 nofile >= table_open_cache * 2 + 系统预留 = ~65536
+        ulimits:
+            nofile:
+                soft: 65536
+                hard: 65536
+        build:
+            context: ../..
+            dockerfile: build/mysql/${MYSQL_BUILD_VERSION:-8.4}/Dockerfile
+            args:
+                # MYSQL_VER 由脚本层 derive_mysql_build_ver 按 MYSQL_BUILD_VERSION
+                # 自动解析该通道最新版；空则 Dockerfile 安装 apt Candidate
+                MYSQL_VER: ${MYSQL_VER:-}
+                MYSQL_PIN_POLICY: ${MYSQL_PIN_POLICY:-latest}
+                # GPG 公钥导入失败时默认中止构建；仅临时排障时设为 true（跳过签名校验）
+                MYSQL_ALLOW_INSECURE_APT: ${MYSQL_ALLOW_INSECURE_APT:-false}
+                GOSU_VERSION: ${GOSU_VERSION}
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                HTTP_PROXY: ${HTTP_PROXY:-}
+                HTTPS_PROXY: ${HTTPS_PROXY:-}
+                NO_PROXY: ${NO_PROXY}
+            network: host # 使用主机网络解决DNS问题
+        healthcheck:
+            test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+            start_period: 120s # 16G Buffer Pool 初始化 + ib_buffer_pool 预热需要更长启动时间
+        environment:
+            MYSQL_DATABASE: ${MYSQL_DATABASE}
+            MYSQL_USER: ${MYSQL_USER}
+            MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+            MYSQL_ROOT_HOST: ${MYSQL_ROOT_HOST}
+            MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+            # 切勿将 MYSQL_*_PASSWORD 开关设为字面量 "no"：
+            # 官方/项目 entrypoint 用 [ -n "$VAR" ] 判断，任意非空值（含 "no"）都会生效。
+            # - MYSQL_RANDOM_ROOT_PASSWORD 非空 → 覆盖 MYSQL_ROOT_PASSWORD 并生成随机 root 密码
+            # - MYSQL_ALLOW_EMPTY_PASSWORD 非空 → 允许空 root 密码
+            # 需要启用时设为 "yes"/"true"；默认不启用则不要定义这两个变量。
+            # 启用调试模式
+            # DEBUG: "false"
+            TZ: ${TZ}
+        volumes:
+            - ${MYSQL_DATA_PATH:-${DATA_PATH_HOST}/${MYSQL_DATA_SUBDIR}}:/var/lib/mysql:rw # 留空 MYSQL_DATA_PATH → 自动拼装 ${DATA_PATH_HOST}/${MYSQL_DATA_SUBDIR}
+            # 配置挂到 mount-src（staging），由 entrypoint 复制为 mode 644 后再供 mysqld/mysql 读取。
+            # 切勿直接挂到 /etc/mysql/my.cnf 或 conf.d/：WSL/Windows 9p 上文件常为 777，
+            # MySQL 会忽略 world-writable 配置并打印 Warning。
+            - ${MYSQL_CONF_FILE:-${BUILD_ROOT:-../../build}/mysql/${MYSQL_BUILD_VERSION:-8.4}/config/my.cnf}:/etc/mysql/mount-src/my.cnf:ro # 留空 MYSQL_CONF_FILE → 按 MYSQL_BUILD_VERSION 自动派生
+            - ${BUILD_ROOT:-../../build}/mysql/${MYSQL_BUILD_VERSION:-8.4}/config/conf.d/docker.cnf:/etc/mysql/mount-src/docker.cnf:ro,Z
+            - ${MYSQL_ENV_CONFIG_FILE:-${BUILD_ROOT:-../../build}/mysql/${MYSQL_BUILD_VERSION:-8.4}/config/conf.d/mysql-${PROJECT_ENVIRONMENT_SHORT:-dev}.cnf}:/etc/mysql/mount-src/mysql-env.cnf:ro,Z # 留空 MYSQL_ENV_CONFIG_FILE → 按 MYSQL_BUILD_VERSION + 环境自动派生
+            - ${MYSQL_LOG_DIR}:/var/log/mysql:rw
+            - ${BUILD_ROOT:-../../build}/mysql/${MYSQL_BUILD_VERSION:-8.4}/init-mysql-user.sh:/docker-entrypoint-initdb.d/init-mysql-user.sh:ro
+        ports:
+            - "${MYSQL_BIND_HOST:-127.0.0.1}:${MYSQL_HOST_PORT:-3306}:3306" # 使用不同的端口，默认3306
+        networks:
+            default:
+                aliases:
+                    - mysql # 添加mysql别名，支持使用mysql作为服务名
+        deploy:
+            resources:
+                limits:
+                    cpus: ${MYSQL_LIMITS_CPU}
+                    memory: ${MYSQL_LIMITS_MEMORY}
+                reservations:
+                    memory: ${MYSQL_RESERVATIONS_MEMORY}
+        restart: unless-stopped # 或 always
+        platform: linux/x86_64
+
+    ################  MySQL 备份服务 ########################
+    mysql-backup:
+        env_file:
+            - ${ROOT_ENV_FILE:-../../.env}
+            - ${ENV_DIR:-../../env}/container-strip-host-proxy.env
+        container_name: mysql_backup
+        image: ${MYSQL_BACKUP_IMAGE:-hg_dnmpr_mysql:latest}
+        # 注意：不使用 depends_on，避免强制与 mysql-server 一起启动
+        # 备份脚本内部等待 MySQL 就绪后再执行
+        environment:
+            MYSQL_HOST: ${MYSQL_BACKUP_HOST:-mysql}
+            MYSQL_PORT: ${MYSQL_BACKUP_PORT:-3306}
+            MYSQL_USER: ${MYSQL_BACKUP_USER:-root}
+            MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+            BACKUP_DIR: /backup
+            BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+            BACKUP_AT: ${MYSQL_BACKUP_AT:-02:00}
+            TZ: ${TZ:-Asia/Shanghai}
+        volumes:
+            - ${MYSQL_BACKUP_DIR:-/data/mysql_backup}:/backup:rw
+            - ../../include/shell/backup-mysql.sh:/usr/local/bin/backup-mysql.sh:ro
+        command: ["bash", "/usr/local/bin/backup-mysql.sh"]
+        restart: unless-stopped
+        networks:
+            - default
+        deploy:
+            resources:
+                limits:
+                    cpus: "0.5"
+                    memory: "512M"
+                reservations:
+                    memory: "128M"
+
+    ################  MongoDB 备份服务 ########################
+    mongo-backup:
+        container_name: mongo_backup
+        image: ${MONGO_BACKUP_IMAGE:-hg_dnmpr_mongo_backup:latest}
+        environment:
+            MONGO_HOST: ${MONGO_BACKUP_HOST:-mongo}
+            MONGO_PORT: ${MONGO_BACKUP_PORT:-27017}
+            MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-}
+            MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-}
+            BACKUP_DIR: /backup
+            BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+            BACKUP_AT: ${MONGO_BACKUP_AT:-02:45}
+            TZ: ${TZ:-Asia/Shanghai}
+        volumes:
+            - ${MONGO_BACKUP_DIR:-/data/mongo_backup}:/backup:rw
+            - ../../include/shell/backup-mongo.sh:/usr/local/bin/backup-mongo.sh:ro
+        command: ["bash", "/usr/local/bin/backup-mongo.sh"]
+        restart: unless-stopped
+        networks:
+            - default
+        deploy:
+            resources:
+                limits:
+                    cpus: "0.5"
+                    memory: "512M"
+                reservations:
+                    memory: "128M"
+
+    ################   mongo ########################
+    mongo-server:
+        <<: *default-common
+        container_name: mongo
+        image: hg_dnmpr_mongo:latest
+        build:
+            context: ../..
+            dockerfile: build/mongo/${MONGO_BUILD_VERSION:-8.2}/Dockerfile
+            args:
+                # MONGO_VERSION 由 derive_mongo_build_ver 按 MONGO_BUILD_VERSION 解析；空则 apt Candidate
+                MONGO_VERSION: ${MONGO_VERSION:-}
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                HTTP_PROXY: ${HTTP_PROXY:-}
+                HTTPS_PROXY: ${HTTPS_PROXY:-}
+                NO_PROXY: ${NO_PROXY}
+            network: host # 使用主机网络解决DNS问题
+        environment:
+            MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+            MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+        ports:
+            - "${MONGO_HOST_PORT}:27017"
+        volumes:
+            - ${MONGO_DATA_PATH:-${DATA_PATH_HOST}/${MONGO_DATA_SUBDIR}}:/data/db:rw # 留空 MONGO_DATA_PATH → 自动拼装 ${DATA_PATH_HOST}/${MONGO_DATA_SUBDIR}
+        deploy:
+            resources:
+                limits:
+                    cpus: ${MONGO_LIMITS_CPU}
+                    memory: ${MONGO_LIMITS_MEMORY}
+                reservations:
+                    memory: ${MONGO_RESERVATIONS_MEMORY}
+        networks:
+            - default
+        command: --auth
+
+    #################   postgres  ########################
+    postgres-server:
+        <<: *default-common
+        container_name: postgres
+        image: hg_dnmpr_postgres:latest
+        build:
+            context: ../..
+            dockerfile: build/postgres/${PG_MAJOR:-18}/${PG_VARIANT:-bookworm}/Dockerfile
+            args:
+                # PG_VERSION 由 derive_pg_build_ver 按 PG_MAJOR 解析；空则装 apt Candidate
+                PG_VERSION: ${PG_VERSION:-}
+                PG_PIN_POLICY: ${PG_PIN_POLICY:-latest}
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                HTTP_PROXY: ${HTTP_PROXY:-}
+                HTTPS_PROXY: ${HTTPS_PROXY:-}
+                NO_PROXY: ${NO_PROXY}
+            network: host # 使用主机网络解决DNS问题
+        ports:
+            - "${PG_PORT}:5432"
+        environment:
+            # PG_USER: ${PG_USER}
+            # PG_PASSWORD: ${PG_PASSWORD}
+            POSTGRES_USER: ${PG_USER}
+            POSTGRES_PASSWORD: ${PG_PASSWORD}
+            ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
+        volumes:
+            - ${POSTGRES_DATA_PATH:-${DATA_PATH_HOST}/${POSTGRES_DATA_SUBDIR}}:/var/lib/postgresql/data # 留空 POSTGRES_DATA_PATH → 自动拼装 ${DATA_PATH_HOST}/${POSTGRES_DATA_SUBDIR}
+        deploy:
+            resources:
+                limits:
+                    cpus: ${PG_LIMITS_CPU}
+                    memory: ${PG_LIMITS_MEMORY}
+                reservations:
+                    memory: ${PG_RESERVATIONS_MEMORY}
+        networks:
+            - default
+        restart: unless-stopped
+
+    ################  PostgreSQL 备份服务 ########################
+    postgres-backup:
+        container_name: postgres_backup
+        image: ${PG_BACKUP_IMAGE:-hg_dnmpr_postgres_backup:latest}
+        environment:
+            PG_HOST: ${PG_BACKUP_HOST:-postgres}
+            PG_PORT: ${PG_BACKUP_PORT:-5432}
+            POSTGRES_USER: ${PG_USER:-}
+            PGPASSWORD: ${PG_PASSWORD:-}
+            BACKUP_DIR: /backup
+            BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+            BACKUP_AT: ${PG_BACKUP_AT:-04:20}
+            TZ: ${TZ:-Asia/Shanghai}
+        volumes:
+            - ${PG_BACKUP_DIR:-/data/pg_backup}:/backup:rw
+            - ../../include/shell/backup-pg.sh:/usr/local/bin/backup-pg.sh:ro
+        command: ["bash", "/usr/local/bin/backup-pg.sh"]
+        restart: unless-stopped
+        networks:
+            - default
+        deploy:
+            resources:
+                limits:
+                    cpus: "0.5"
+                    memory: "512M"
+                reservations:
+                    memory: "128M"
+
+    pgadmin-server:
+        container_name: pgadmin
+        image: dpage/pgadmin4
+        environment:
+            PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-}
+            PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-}
+            PGADMIN_CONFIG_SERVER_MODE: "False"
+        volumes:
+            - ${PGADMIN_DATA_PATH:-${DATA_PATH_HOST}/${PGADMIN_DATA_SUBDIR}}:/var/lib/pgadmin # 留空 PGADMIN_DATA_PATH → 自动拼装 ${DATA_PATH_HOST}/${PGADMIN_DATA_SUBDIR}
+        ports:
+            - "${PGADMIN_PORT:-5050}:80"
+        networks:
+            - default
+        restart: unless-stopped
+
+    #################   timescaledb  ########################
+    # TimescaleDB：PostgreSQL 时序扩展，采用官方 timescale/timescaledb:pg18 镜像
+    # 与主 PostgreSQL 实例独立部署，通过端口 5433 隔离
+    timescaledb-server:
+        <<: *default-common
+        container_name: timescaledb
+        image: ${TIMESCALE_IMAGE:-timescale/timescaledb:pg18}
+        ports:
+            - "${TIMESCALE_PORT:-5433}:5432"
+        environment:
+            POSTGRES_USER: ${TIMESCALE_USER}
+            POSTGRES_PASSWORD: ${TIMESCALE_PASSWORD}
+            # TimescaleDB 必须在 shared_preload_libraries 中预加载
+            POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+        # 官方镜像通过 POSTGRES_INITDB_ARGS/命令行注入 shared_preload_libraries
+        command: ["postgres", "-c", "shared_preload_libraries=timescaledb"]
+        volumes:
+            - ${TIMESCALE_DATA_PATH:-${DATA_PATH_HOST}/${TIMESCALE_DATA_SUBDIR}}:/var/lib/postgresql/data # 留空 TIMESCALE_DATA_PATH → 自动拼装 ${DATA_PATH_HOST}/${TIMESCALE_DATA_SUBDIR}
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U ${TIMESCALE_USER:-postgres}"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+            start_period: 60s
+        deploy:
+            resources:
+                limits:
+                    cpus: ${TIMESCALE_LIMITS_CPU:-2}
+                    memory: ${TIMESCALE_LIMITS_MEMORY:-4G}
+                reservations:
+                    memory: ${TIMESCALE_RESERVATIONS_MEMORY:-1G}
+        networks:
+            default:
+                aliases:
+                    - timescaledb
+        restart: unless-stopped
+
+    ################  TimescaleDB 备份服务 ########################
+    timescaledb-backup:
+        container_name: timescaledb_backup
+        image: ${TIMESCALE_BACKUP_IMAGE:-timescale/timescaledb:pg18}
+        environment:
+            PG_HOST: ${TIMESCALE_BACKUP_HOST:-timescaledb}
+            PG_PORT: ${TIMESCALE_BACKUP_PORT:-5432}
+            POSTGRES_USER: ${TIMESCALE_USER:-}
+            PGPASSWORD: ${TIMESCALE_PASSWORD:-}
+            BACKUP_DIR: /backup
+            BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+            BACKUP_AT: ${TIMESCALE_BACKUP_AT:-04:40}
+            TZ: ${TZ:-Asia/Shanghai}
+        volumes:
+            - ${TIMESCALE_BACKUP_DIR:-/data/timescaledb_backup}:/backup:rw
+            - ../../include/shell/backup-timescaledb.sh:/usr/local/bin/backup-timescaledb.sh:ro
+        command: ["bash", "/usr/local/bin/backup-timescaledb.sh"]
+        restart: unless-stopped
+        networks:
+            - default
+        deploy:
+            resources:
+                limits:
+                    cpus: "0.5"
+                    memory: "512M"
+                reservations:
+                    memory: "128M"
+
+    #################   pgvector  ########################
+    # pgvector：PostgreSQL 向量扩展，自建镜像（FROM hg_dnmpr_postgres:latest + apt pgvector）
+    # 构建依赖：必须先构建 postgres 镜像（build.sh postgres）
+    pgvector-server:
+        <<: *default-common
+        container_name: pgvector
+        image: hg_dnmpr_pgvector:latest
+        build:
+            context: ../..
+            dockerfile: build/pgvector/${PGVECTOR_PG_MAJOR:-18}/${PGVECTOR_VARIANT:-bookworm}/Dockerfile
+            args:
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                HTTP_PROXY: ${HTTP_PROXY:-}
+                HTTPS_PROXY: ${HTTPS_PROXY:-}
+                NO_PROXY: ${NO_PROXY}
+            network: host # 使用主机网络解决DNS问题
+        ports:
+            - "${PGVECTOR_PORT:-5434}:5432"
+        environment:
+            POSTGRES_USER: ${PGVECTOR_USER}
+            POSTGRES_PASSWORD: ${PGVECTOR_PASSWORD}
+        volumes:
+            - ${PGVECTOR_DATA_PATH:-${DATA_PATH_HOST}/${PGVECTOR_DATA_SUBDIR}}:/var/lib/postgresql/data # 留空 PGVECTOR_DATA_PATH → 自动拼装 ${DATA_PATH_HOST}/${PGVECTOR_DATA_SUBDIR}
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U ${PGVECTOR_USER:-postgres}"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+            start_period: 60s
+        deploy:
+            resources:
+                limits:
+                    cpus: ${PGVECTOR_LIMITS_CPU:-2}
+                    memory: ${PGVECTOR_LIMITS_MEMORY:-4G}
+                reservations:
+                    memory: ${PGVECTOR_RESERVATIONS_MEMORY:-1G}
+        networks:
+            default:
+                aliases:
+                    - pgvector
+        restart: unless-stopped
+
+    ################  pgvector 备份服务 ########################
+    pgvector-backup:
+        container_name: pgvector_backup
+        image: ${PGVECTOR_BACKUP_IMAGE:-hg_dnmpr_pgvector:latest}
+        environment:
+            PG_HOST: ${PGVECTOR_BACKUP_HOST:-pgvector}
+            PG_PORT: ${PGVECTOR_BACKUP_PORT:-5432}
+            POSTGRES_USER: ${PGVECTOR_USER:-}
+            PGPASSWORD: ${PGVECTOR_PASSWORD:-}
+            BACKUP_DIR: /backup
+            BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+            BACKUP_AT: ${PGVECTOR_BACKUP_AT:-05:00}
+            TZ: ${TZ:-Asia/Shanghai}
+        volumes:
+            - ${PGVECTOR_BACKUP_DIR:-/data/pgvector_backup}:/backup:rw
+            - ../../include/shell/backup-pgvector.sh:/usr/local/bin/backup-pgvector.sh:ro
+        command: ["bash", "/usr/local/bin/backup-pgvector.sh"]
+        restart: unless-stopped
+        networks:
+            - default
+        deploy:
+            resources:
+                limits:
+                    cpus: "0.5"
+                    memory: "512M"
+                reservations:
+                    memory: "128M"
+
+    #################   clickhouse  ########################
+    # ClickHouse：OLAP 列式数据库，自建镜像（FROM 官方 + 预置中国镜像源/时区/Prometheus）
+    clickhouse-server:
+        <<: *default-common
+        container_name: clickhouse
+        image: hg_dnmpr_clickhouse:latest
+        build:
+            context: ../..
+            dockerfile: build/clickhouse/${CLICKHOUSE_BUILD_VERSION:-24.8}/Dockerfile
+            args:
+                CLICKHOUSE_IMAGE: ${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:24.8}
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                HTTP_PROXY: ${HTTP_PROXY:-}
+                HTTPS_PROXY: ${HTTPS_PROXY:-}
+                NO_PROXY: ${NO_PROXY}
+                TZ: ${TZ:-Asia/Shanghai}
+            network: host # 使用主机网络解决DNS问题
+        ports:
+            - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+            - "${CLICKHOUSE_TCP_PORT:-9000}:9000"
+            - "${CLICKHOUSE_INTERSERVER_PORT:-9009}:9009"
+        environment:
+            CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+            CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+            TZ: ${TZ:-Asia/Shanghai}
+        # 自定义 entrypoint：先用 CLICKHOUSE_PASSWORD 重写 users.d 密码哈希，再 exec 官方 entrypoint
+        command: ["/entrypoint-init.sh"]
+        volumes:
+            - ${CLICKHOUSE_DATA_PATH:-${DATA_PATH_HOST}/${CLICKHOUSE_DATA_SUBDIR}}:/var/lib/clickhouse:rw
+            - ${CLICKHOUSE_LOG_PATH:-/var/log/clickhouse-server}:/var/log/clickhouse-server:rw
+        healthcheck:
+            test: ["CMD-SHELL", "curl -sf http://localhost:8123/?query=SELECT%201 >/dev/null 2>&1 || exit 1"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+            start_period: 60s
+        ulimits:
+            nofile:
+                soft: 262144
+                hard: 262144
+        deploy:
+            resources:
+                limits:
+                    cpus: ${CLICKHOUSE_LIMITS_CPU:-2}
+                    memory: ${CLICKHOUSE_LIMITS_MEMORY:-4G}
+                reservations:
+                    memory: ${CLICKHOUSE_RESERVATIONS_MEMORY:-1G}
+        networks:
+            default:
+                aliases:
+                    - clickhouse
+        restart: unless-stopped
+
+    ################  ClickHouse 备份服务 ########################
+    clickhouse-backup:
+        container_name: clickhouse_backup
+        image: ${CLICKHOUSE_BACKUP_IMAGE:-hg_dnmpr_clickhouse:latest}
+        environment:
+            CLICKHOUSE_HOST: ${CLICKHOUSE_BACKUP_HOST:-clickhouse}
+            CLICKHOUSE_HTTP_PORT: ${CLICKHOUSE_BACKUP_HTTP_PORT:-8123}
+            CLICKHOUSE_USER: ${CLICKHOUSE_USER:-}
+            CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+            CLICKHOUSE_DATA_DIR: /var/lib/clickhouse
+            BACKUP_DIR: /backup
+            BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+            BACKUP_AT: ${CLICKHOUSE_BACKUP_AT:-05:20}
+            TZ: ${TZ:-Asia/Shanghai}
+        volumes:
+            - ${CLICKHOUSE_BACKUP_DIR:-/data/clickhouse_backup}:/backup:rw
+            - ../../include/shell/backup-clickhouse.sh:/usr/local/bin/backup-clickhouse.sh:ro
+        command: ["bash", "/usr/local/bin/backup-clickhouse.sh"]
+        restart: unless-stopped
+        networks:
+            - default
+        deploy:
+            resources:
+                limits:
+                    cpus: "0.5"
+                    memory: "512M"
+                reservations:
+                    memory: "128M"
+
+volumes:
+    # MySQL数据卷（已在mysql-server服务中使用）
+    mysql_data:
+        driver: local
+    # MongoDB数据卷
+    mongo_data:
+        driver: local
+    # PostgreSQL数据卷
+    postgres_data:
+        driver: local
+    # pgAdmin数据卷
+    pgadmin:
+    # Redis 数据卷（AOF + RDB 持久化文件）
+    redis_data:
+        driver: local
+    # Valkey 数据卷（与 Redis 同结构）
+    valkey_data:
+        driver: local
+    # TimescaleDB 数据卷
+    timescaledb_data:
+        driver: local
+    # pgvector 数据卷
+    pgvector_data:
+        driver: local
+    # ClickHouse 数据卷
+    clickhouse_data:
+        driver: local

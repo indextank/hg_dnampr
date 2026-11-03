@@ -1,0 +1,4 @@
+- targets: []
+  labels:
+    service: mongo
+    stack: hg_dnmpr

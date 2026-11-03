@@ -1,0 +1,116 @@
+{
+  "id": null,
+  "uid": "mysql-overview",
+  "title": "MySQL 监控总览",
+  "tags": [
+    "mysql",
+    "monitoring"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "editable": false,
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "MySQL 存活状态",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "up{job=\"mysql-exporter\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "连接数",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "mysql_global_status_threads_connected",
+          "legendFormat": "connected",
+          "refId": "A"
+        },
+        {
+          "expr": "mysql_global_status_max_used_connections",
+          "legendFormat": "max_used",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "每秒查询数 (QPS)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "rate(mysql_global_status_queries[5m])",
+          "legendFormat": "qps",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "InnoDB Buffer Pool 使用情况",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "mysql_global_status_buffer_pool_bytes_data",
+          "legendFormat": "data_bytes",
+          "refId": "A"
+        },
+        {
+          "expr": "mysql_global_variables_innodb_buffer_pool_size",
+          "legendFormat": "pool_size",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "慢查询速率",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "rate(mysql_global_status_slow_queries[5m])",
+          "legendFormat": "slow_qps",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

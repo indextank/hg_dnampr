@@ -1,0 +1,4 @@
+- targets: []
+  labels:
+    service: pgvector
+    stack: hg_dnmpr

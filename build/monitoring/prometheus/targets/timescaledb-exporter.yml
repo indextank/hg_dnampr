@@ -1,0 +1,4 @@
+- targets: []
+  labels:
+    service: timescaledb
+    stack: hg_dnmpr

@@ -1,0 +1,5 @@
+- targets:
+    - rabbitmq:15692
+  labels:
+    service: rabbitmq
+    stack: hg_dnmpr

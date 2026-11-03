@@ -1,0 +1,123 @@
+# ==========================================
+# Syncer (go_mysql_sync_es) — MySQL ➜ Elasticsearch 同步服务编排
+# ==========================================
+# 本文件仅定义 Syncer Go 应用服务。
+#
+# ── MySQL 数据源说明 ──────────────────────────────────────────
+#   本地开发：beacon_dev / wechat_collect 位于 hg_dnmpr 主栈的共享
+#             mysql 容器中，通过 hg_dnmpr_network 互通；Syncer 使用
+#             configs/config.yaml，并由下方 SYNCER_MYSQL_HOST=mysql 将 DSN 中的主机改为容器名。
+#   生产环境：两个数据库分别位于独立宿主机服务器时，可改 SYNCER_* 环境变量或
+#             直接改 go_mysql_sync_es/configs/config.yaml 中的默认地址。
+#
+# ── 前置依赖（由 up.sh 自动检测并按需启动）────────────────────
+#   rabbitmq + canal-server  ← compose/stacks/rabbitmq.yaml
+#   elasticsearch + kibana   ← compose/stacks/elk.yaml
+#
+# ── 使用方式 ──────────────────────────────────────────────────
+#   启动: ./up.sh syncer -d
+#   停止: ./up.sh syncer stop
+#   卸载: ./up.sh syncer down
+# ==========================================
+
+name: hg_dnmpr_syncer
+
+x-common: &default-common
+    restart: unless-stopped
+    env_file:
+        - ${ENV_DIR:-../../env}/base.env
+        - ${ENV_DIR:-../../env}/syncer.env
+        - ${ROOT_ENV_FILE:-../../.env}
+        - ${ENV_DIR:-../../env}/container-strip-host-proxy.env
+    dns:
+        - ${DNS_PRIMARY:-223.5.5.5}
+        - ${DNS_SECONDARY:-114.114.114.114}
+    dns_opt:
+        - use-vc
+        - timeout:2
+        - attempts:3
+    # ICMP(ping) 需要 CAP_NET_RAW，显式声明避免运行环境默认能力收紧。
+    cap_add:
+        - NET_RAW
+    logging:
+        driver: "json-file"
+        options:
+            max-size: "100m"
+            max-file: "3"
+    security_opt:
+        - no-new-privileges:true
+
+services:
+    # ============================================================
+    #  Syncer — Go 同步服务（消费 RabbitMQ 消息，写入 Elasticsearch）
+    # ============================================================
+    #  运行时依赖（通过 hg_dnmpr_network 共享网络互通）：
+    #    rabbitmq      ← hg_dnmpr_rabbitmq 栈
+    #    canal-server  ← hg_dnmpr_rabbitmq 栈
+    #    elasticsearch ← hg_dnmpr_elk 栈
+    #  以上依赖由 up.sh 在启动本服务前自动检测并按需启动。
+    # ============================================================
+    syncer:
+        <<: *default-common
+        build:
+            context: ${SYNCER_PROJECT_PATH:-/data/go_mysql_sync_es}
+            dockerfile: ../hg_dnmpr/build/syncer/Dockerfile
+            args:
+                CHANGE_SOURCE: ${CHANGE_SOURCE:-false}
+                HTTP_PROXY: ${HTTP_PROXY}
+                HTTPS_PROXY: ${HTTPS_PROXY}
+                ALL_PROXY: ${ALL_PROXY}
+                NO_PROXY: ${NO_PROXY}
+            network: host
+        image: syncer:latest
+        container_name: syncer
+        hostname: syncer
+        environment:
+            TZ: ${TZ:-Asia/Shanghai}
+            # SYNCER_MYSQL_HOST 用于将 DSN 中的主机地址覆盖为 Docker 网络内的服务名。
+            # 开发环境（数据库在本地 mysql 容器）：取消注释并设为 mysql
+            # 生产环境（数据库在远端服务器）：保持注释，DSN 中的真实 IP 生效
+            # SYNCER_MYSQL_HOST: mysql
+            # ES 地址协议跟随 ELASTICSEARCH_PROTOCOL（由 elk.dev.env / elk.prod.env 注入）：
+            #   dev  环境：ELASTICSEARCH_PROTOCOL=http  → http://elasticsearch:9200
+            #   prod 环境：ELASTICSEARCH_PROTOCOL=https → https://elasticsearch:9200
+            # 默认值 https，匹配当前 ES HTTPS 配置
+            SYNCER_ELASTICSEARCH_ADDRESSES: "${ELASTICSEARCH_PROTOCOL:-https}://elasticsearch:9200"
+            # CA 证书路径：HTTPS 模式下用于验证 ES 自签名证书；
+            # 当前使用 insecure_skip_verify=true，此项留空不生效。
+            # SYNCER_ELASTICSEARCH_CA_CERT: "/app/certs/es-ca.crt"
+            SYNCER_MQ_RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER:-}:${RABBITMQ_DEFAULT_PASS:-}@rabbitmq:5672/"
+        volumes:
+            - ${SYNCER_PROJECT_PATH:-/data/go_mysql_sync_es}/configs:/app/configs:ro
+            # CA 证书挂载：仅在已生成 ES 自签名 CA 且 insecure_skip_verify=false 时启用
+            # - ${ELASTICSEARCH_CONF_DIR:-../../build/elk/${ELK_BUILD_VERSION:-9.5}/elasticsearch/config}/certs/ca/ca.crt:/app/certs/es-ca.crt:ro
+        ports:
+            - "${SYNCER_HOST_PORT:-8080}:8080"
+        command: ["--config", "/app/configs/config.yaml"]
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "wget",
+                    "-q",
+                    "--spider",
+                    "http://localhost:8080/health",
+                ]
+            interval: 30s
+            timeout: 5s
+            retries: 5
+            start_period: 15s
+        deploy:
+            resources:
+                limits:
+                    cpus: "${SYNCER_LIMITS_CPU:-1}"
+                    memory: ${SYNCER_LIMITS_MEMORY:-512M}
+                reservations:
+                    memory: ${SYNCER_RESERVATIONS_MEMORY:-128M}
+        networks:
+            - lnamp_network
+
+networks:
+    lnamp_network:
+        external: true
+        name: hg_dnmpr_network

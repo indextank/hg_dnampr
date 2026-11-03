@@ -1,0 +1,24 @@
+# ==========================================
+# Nginx ELK 生产环境 overlay
+# ==========================================
+# 用途：为 nginx 容器追加 ELK 所需的网络配置
+# 使用：docker compose -f compose/main.yaml [-f compose/overlays/prod.yaml] -f compose/overlays/elk-nginx.yaml up -d nginx
+#
+# 说明：
+#   证书已统一存放于 vhost/nginx_vhost/certs/，通过主栈 NGINX_VHOST_DIR 挂载为
+#   /etc/nginx/conf.d/，子目录 certs/ 即内含证书文件。
+#   无需额外卷挂载。
+#
+#   networks: default（即 hg_dnmpr_network，ELK 栈共享网络，使 nginx 可通过容器名访问 kibana）
+#
+# 注意：主栈 compose/main.yaml 里 default 网络的 name 已是 hg_dnmpr_network，
+#       ELK 栈的 compose/stacks/elk.yaml 也以 external 方式加入同一网络，
+#       因此此处只需增加 default 网络即可，无需重复声明 external 网络
+# ==========================================
+
+name: hg_dnmpr
+
+services:
+  nginx:
+    networks:
+      - default

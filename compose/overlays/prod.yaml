@@ -1,0 +1,610 @@
+# ========================
+# 生产环境专用配置说明
+# ========================
+# 特性：
+# 1. 支持按服务调整副本（与固定 container_name/宿主机端口并存的服务须保持 replicas=1，见各服务注释）
+# 2. 资源配额限制与预留
+# 3. 滚动更新策略
+# 4. 生产级日志管理
+# 5. 云原生存储配置
+
+# PHP 运行时性能（生产环境）：将 env/php.env 的 PHP_PROD_* 映射为容器内统一变量名，
+# 当 ENVIRONMENT=production 选中本 overlay 时自动加载。
+# 真正写入 php.ini 的覆盖由 up.sh 生成 zz-profile-overrides.ini 并挂载到容器 conf.d。
+x-php-perf-env: &php-perf-env
+  PHP_MEMORY_LIMIT: ${PHP_PROD_MEMORY_LIMIT:-2048M}
+  PHP_MAX_EXECUTION_TIME: ${PHP_PROD_MAX_EXECUTION_TIME:-60}
+  PHP_UPLOAD_MAX_FILESIZE: ${PHP_PROD_UPLOAD_MAX_FILESIZE:-128M}
+  PHP_POST_MAX_SIZE: ${PHP_PROD_POST_MAX_SIZE:-128M}
+  PHP_MAX_INPUT_VARS: ${PHP_PROD_MAX_INPUT_VARS:-5000}
+  PHP_DISPLAY_ERRORS: ${PHP_PROD_DISPLAY_ERRORS:-Off}
+  PHP_ERROR_REPORTING: "${PHP_PROD_ERROR_REPORTING:-E_ALL & ~E_DEPRECATED}"
+
+services:
+  nginx:
+    extends:
+      file: stacks/web.yaml
+      service: nginx-server
+    deploy:
+      # 与 compose/stacks/web.yaml 中 container_name + 宿主机 ports 映射并存时，replicas 必须为 1（Compose 校验）
+      # 多副本需去掉固定 container_name，并解决端口/数据卷冲突（如前置 LB、Swarm/K8s）
+      replicas: ${NGINX_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      resources:
+        # 生产资源配额（根据实际负载调整）
+        limits:
+          cpus: ${NGINX_PROD_LIMITS_CPU:-1} # 最大CPU核心数
+          memory: ${NGINX_PROD_LIMITS_MEMORY:-512M} # 最大内存限制
+        reservations:
+          cpus: ${NGINX_PROD_RESERVATIONS_CPU:-0.5} # 预留CPU核心数
+          memory: ${NGINX_PROD_RESERVATIONS_MEMORY:-256M} # 预留内存
+    logging:
+      driver: "json-file" # 生产环境建议使用 gelf, fluentd 等
+      options:
+        # 生产日志配置（WARN级别）
+        max-size: "100m" # 建议值：100-500MB
+        max-file: "5" # 建议值：5-10个文件
+        # tag: "{{.ImageName}}/{{.Name}}/{{.ID}}"
+
+  tengine:
+    extends:
+      file: stacks/web.yaml
+      service: tengine-server
+    deploy:
+      replicas: ${TENGINE_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${TENGINE_PROD_LIMITS_CPU:-1}
+          memory: ${TENGINE_PROD_LIMITS_MEMORY:-512M}
+        reservations:
+          cpus: ${TENGINE_PROD_RESERVATIONS_CPU:-0.5}
+          memory: ${TENGINE_PROD_RESERVATIONS_MEMORY:-256M}
+    logging:
+      driver: "json-file"
+      options:
+        # 生产日志配置（WARN级别）
+        max-size: "100m" # 建议值：100-500MB
+        max-file: "5" # 建议值：5-10个文件
+
+  valkey:
+    extends:
+      file: stacks/databases.yaml
+      service: valkey-server
+    deploy:
+      replicas: ${VALKEY_PROD_REPLICAS:-1} # 固定 container_name + 宿主机端口时仅允许单副本
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${VALKEY_PROD_LIMITS_CPU:-0.5}
+          memory: ${VALKEY_PROD_LIMITS_MEMORY:-512M}
+        reservations:
+          cpus: ${VALKEY_PROD_RESERVATIONS_CPU:-0.25}
+          memory: ${VALKEY_PROD_RESERVATIONS_MEMORY:-256M}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  redis:
+    extends:
+      file: stacks/databases.yaml
+      service: redis-server
+    deploy:
+      replicas: ${REDIS_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${REDIS_PROD_LIMITS_CPU:-0.5}
+          memory: ${REDIS_PROD_LIMITS_MEMORY:-512M}
+        reservations:
+          cpus: ${REDIS_PROD_RESERVATIONS_CPU:-0.25}
+          memory: ${REDIS_PROD_RESERVATIONS_MEMORY:-256M}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  mongo:
+    extends:
+      file: stacks/databases.yaml
+      service: mongo-server
+    deploy:
+      replicas: ${MONGO_PROD_REPLICAS:-1} # MongoDB副本集通常通过其自身机制管理，Compose中常为1
+      update_config:
+        parallelism: 1
+        delay: 30s # 数据库更新应更谨慎
+        order: start-first
+      resources:
+        limits:
+          cpus: ${MONGO_PROD_LIMITS_CPU:-1}
+          memory: ${MONGO_PROD_LIMITS_MEMORY:-2G}
+        reservations:
+          cpus: ${MONGO_PROD_RESERVATIONS_CPU:-0.5}
+          memory: ${MONGO_PROD_RESERVATIONS_MEMORY:-1G}
+    logging:
+      driver: "json-file"
+      options:
+        # 生产日志配置（WARN级别）
+        max-size: "100m" # 建议值：100-500MB
+        max-file: "5" # 建议值：5-10个文件
+
+  mysql:
+    extends:
+      file: stacks/databases.yaml
+      service: mysql-server
+    environment:
+      # 生产环境不创建 dev 普通用户，仅初始化 root 账号
+      # 置空后：docker-entrypoint.sh 的 docker_setup_db() 跳过用户创建
+      #         init-mysql-user.sh 检测到空值后优雅退出（exit 0）
+      MYSQL_USER: ""
+      MYSQL_PASSWORD: ""
+    deploy:
+      replicas: ${MYSQL_PROD_REPLICAS:-1} # MySQL主从/集群通常有其自身管理方式
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${MYSQL_PROD_LIMITS_CPU:-1}
+          memory: ${MYSQL_PROD_LIMITS_MEMORY:-2G}
+        reservations:
+          cpus: ${MYSQL_PROD_RESERVATIONS_CPU:-0.5}
+          memory: ${MYSQL_PROD_RESERVATIONS_MEMORY:-1G}
+    logging:
+      driver: "json-file"
+      options:
+        # 生产日志配置（WARN级别）
+        max-size: "100m" # 建议值：100-500MB
+        max-file: "5" # 建议值：5-10个文件
+  mysql_backup:
+    extends:
+      file: stacks/databases.yaml
+      service: mysql-backup
+    deploy:
+      replicas: ${MYSQL_BACKUP_PROD_REPLICAS:-1} # 备份服务通常单副本即可
+      update_config:
+        parallelism: 1
+        delay: 30s # 备份服务更新应更谨慎
+        order: start-first
+      resources:
+        limits:
+          cpus: ${MYSQL_BACKUP_PROD_LIMITS_CPU:-0.5}
+          memory: ${MYSQL_BACKUP_PROD_LIMITS_MEMORY:-512M}
+        reservations:
+          cpus: ${MYSQL_BACKUP_PROD_RESERVATIONS_CPU:-0.1}
+          memory: ${MYSQL_BACKUP_PROD_RESERVATIONS_MEMORY:-128M}
+    logging:
+      driver: "json-file"
+      options:
+        # 生产日志配置（WARN级别）
+        max-size: "50m" # 建议值：50-100MB
+        max-file: "5" # 建议值：5-10个文件
+
+  postgres:
+    extends:
+      file: stacks/databases.yaml
+      service: postgres-server
+    deploy:
+      replicas: ${POSTGRES_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${POSTGRES_PROD_LIMITS_CPU:-1}
+          memory: ${POSTGRES_PROD_LIMITS_MEMORY:-2G}
+        reservations:
+          cpus: ${POSTGRES_PROD_RESERVATIONS_CPU:-0.5}
+          memory: ${POSTGRES_PROD_RESERVATIONS_MEMORY:-1G}
+    logging:
+      driver: "json-file"
+      options:
+        # 生产日志配置（WARN级别）
+        max-size: "100m" # 建议值：100-500MB
+        max-file: "5" # 建议值：5-10个文件
+
+  pgadmin:
+    extends:
+      file: stacks/databases.yaml
+      service: pgadmin-server
+    deploy:
+      replicas: 1 # pgAdmin通常单副本即可
+      resources:
+        limits:
+          cpus: ${PGADMIN_PROD_LIMITS_CPU:-0.5}
+          memory: ${PGADMIN_PROD_LIMITS_MEMORY:-256M}
+        reservations:
+          cpus: ${PGADMIN_PROD_RESERVATIONS_CPU:-0.1}
+          memory: ${PGADMIN_PROD_RESERVATIONS_MEMORY:-128M}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  mongo-backup:
+    extends:
+      file: stacks/databases.yaml
+      service: mongo-backup
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+        reservations:
+          cpus: "0.1"
+          memory: "128M"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  postgres-backup:
+    extends:
+      file: stacks/databases.yaml
+      service: postgres-backup
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+        reservations:
+          cpus: "0.1"
+          memory: "128M"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  timescaledb:
+    extends:
+      file: stacks/databases.yaml
+      service: timescaledb-server
+    deploy:
+      replicas: ${TIMESCALE_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${TIMESCALE_PROD_LIMITS_CPU:-2}
+          memory: ${TIMESCALE_PROD_LIMITS_MEMORY:-4G}
+        reservations:
+          cpus: ${TIMESCALE_PROD_RESERVATIONS_CPU:-1}
+          memory: ${TIMESCALE_PROD_RESERVATIONS_MEMORY:-1G}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  timescaledb_backup:
+    extends:
+      file: stacks/databases.yaml
+      service: timescaledb-backup
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+        reservations:
+          cpus: "0.1"
+          memory: "128M"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  pgvector:
+    extends:
+      file: stacks/databases.yaml
+      service: pgvector-server
+    deploy:
+      replicas: ${PGVECTOR_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${PGVECTOR_PROD_LIMITS_CPU:-2}
+          memory: ${PGVECTOR_PROD_LIMITS_MEMORY:-4G}
+        reservations:
+          cpus: ${PGVECTOR_PROD_RESERVATIONS_CPU:-1}
+          memory: ${PGVECTOR_PROD_RESERVATIONS_MEMORY:-1G}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  pgvector_backup:
+    extends:
+      file: stacks/databases.yaml
+      service: pgvector-backup
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+        reservations:
+          cpus: "0.1"
+          memory: "128M"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  clickhouse:
+    extends:
+      file: stacks/databases.yaml
+      service: clickhouse-server
+    deploy:
+      replicas: ${CLICKHOUSE_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${CLICKHOUSE_PROD_LIMITS_CPU:-2}
+          memory: ${CLICKHOUSE_PROD_LIMITS_MEMORY:-4G}
+        reservations:
+          cpus: ${CLICKHOUSE_PROD_RESERVATIONS_CPU:-1}
+          memory: ${CLICKHOUSE_PROD_RESERVATIONS_MEMORY:-1G}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  clickhouse_backup:
+    extends:
+      file: stacks/databases.yaml
+      service: clickhouse-backup
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+        reservations:
+          cpus: "0.1"
+          memory: "128M"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  php85_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php85_apache
+    environment:
+      <<: *php-perf-env
+    deploy:
+      replicas: ${PHP_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${PHP_PROD_LIMITS_CPU:-1}
+          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+        reservations:
+          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+    logging:
+      driver: "json-file"
+      options:
+        # 生产日志配置（WARN级别）
+        max-size: "100m" # 建议值：100-500MB
+        max-file: "5" # 建议值：5-10个文件
+
+  php84_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php84_apache
+    environment:
+      <<: *php-perf-env
+    deploy:
+      replicas: ${PHP_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${PHP_PROD_LIMITS_CPU:-1}
+          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+        reservations:
+          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+    logging:
+      driver: "json-file"
+      options:
+        # 生产日志配置（WARN级别）
+        max-size: "100m" # 建议值：100-500MB
+        max-file: "5" # 建议值：5-10个文件
+
+  php83_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php83_apache
+    environment:
+      <<: *php-perf-env
+    deploy:
+      replicas: ${PHP_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${PHP_PROD_LIMITS_CPU:-1}
+          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+        reservations:
+          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+    logging:
+      driver: "json-file"
+      options:
+        # 生产日志配置（WARN级别）
+        max-size: "100m" # 建议值：100-500MB
+        max-file: "5" # 建议值：5-10个文件
+
+  php82_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php82_apache
+    environment:
+      <<: *php-perf-env
+    deploy:
+      replicas: ${PHP_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${PHP_PROD_LIMITS_CPU:-1}
+          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+        reservations:
+          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+    logging:
+      driver: "json-file"
+      options:
+        # 生产日志配置（WARN级别）
+        max-size: "100m" # 建议值：100-500MB
+        max-file: "5" # 建议值：5-10个文件
+
+  php81_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php81_apache
+    environment:
+      <<: *php-perf-env
+    deploy:
+      replicas: ${PHP_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${PHP_PROD_LIMITS_CPU:-1}
+          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+        reservations:
+          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+    logging:
+      driver: "json-file"
+      options:
+        # 生产日志配置（WARN级别）
+        max-size: "100m" # 建议值：100-500MB
+        max-file: "5" # 建议值：5-10个文件
+
+  php80_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php80_apache
+    environment:
+      <<: *php-perf-env
+    deploy:
+      replicas: ${PHP_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${PHP_PROD_LIMITS_CPU:-1}
+          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+        reservations:
+          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+    logging:
+      driver: "json-file"
+      options:
+        # 生产日志配置（WARN级别）
+        max-size: "100m" # 建议值：100-500MB
+        max-file: "5" # 建议值：5-10个文件
+
+  php74_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php74_apache
+    environment:
+      <<: *php-perf-env
+    deploy:
+      replicas: ${PHP_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${PHP_PROD_LIMITS_CPU:-1}
+          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+        reservations:
+          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+    logging:
+      driver: "json-file"
+      options:
+        # 生产日志配置（WARN级别）
+        max-size: "100m" # 建议值：100-500MB
+        max-file: "5" # 建议值：5-10个文件
+
+# 可以根据需要为其他服务添加生产环境特定的覆盖配置
+# 例如，数据库服务在生产环境可能使用特定的云存储卷或不同的备份策略
+# 注：volumes 统一由 compose/main.yaml 声明，overlay 不必重复（同名 driver: local 声明为幂等冗余）。

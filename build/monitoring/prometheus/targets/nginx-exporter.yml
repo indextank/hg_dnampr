@@ -1,0 +1,5 @@
+- targets:
+    - syncer-nginx-exporter:9113
+  labels:
+    service: nginx
+    stack: hg_dnmpr

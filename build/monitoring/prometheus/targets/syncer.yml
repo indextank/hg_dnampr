@@ -1,0 +1,5 @@
+- targets:
+    - syncer:8080
+  labels:
+    service: go-mysql-sync-es
+    stack: hg_dnmpr

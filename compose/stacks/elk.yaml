@@ -1,0 +1,309 @@
+name: hg_dnmpr_elk
+
+x-common: &default-common
+    restart: unless-stopped
+    env_file:
+        - ${ENV_DIR:-../../env}/base.env
+        - ${ENV_DIR:-../../env}/elk.env
+        - ${ROOT_ENV_FILE:-../../.env}
+        - ${ENV_DIR:-../../env}/container-strip-host-proxy.env
+    dns:
+        - ${DNS_PRIMARY:-8.8.8.8}
+        - ${DNS_SECONDARY:-223.5.5.5}
+    dns_opt:
+        - use-vc
+        - timeout:2
+        - attempts:3
+    # ICMP(ping) 需要 CAP_NET_RAW，显式声明避免运行环境默认能力收紧。
+    cap_add:
+        - NET_RAW
+    logging:
+        driver: "json-file"
+        options:
+            max-size: "100m"
+            max-file: "3"
+    security_opt:
+        - no-new-privileges:true # 禁用新特权，防止容器获取额外权限，提高安全性
+
+services:
+    ################   ELK  ########################
+    elasticsearch:
+        <<: *default-common
+        image: hg_dnmpr_elk_elasticsearch:latest
+        build:
+            context: ../..
+            dockerfile: build/elk/${ELK_BUILD_VERSION:-9.5}/elasticsearch/Dockerfile
+            args:
+                ELK_VERSION: ${ELK_VERSION}
+                TINI_VERSION: ${TINI_VERSION:-v0.19.0}
+                ELASTICSEARCH_PLUGINS: ${ELASTICSEARCH_PLUGINS:-}
+                CHANGE_SOURCE: ${CHANGE_SOURCE:-false}
+            network: host
+        container_name: elasticsearch
+        # 通过 -E 命令行参数注入安全/SSL 设置，优先级高于 elasticsearch.yml。
+        # Docker Compose 在此处完成 ${VAR:-default} 替换，不经过 ES 的 YAML 解析器，
+        # 彻底规避 ES 8.x 对 ${VAR:-default} / ${VAR:default} 语法支持不稳定的问题。
+        command: >
+            eswrapper
+            -E xpack.security.enabled=${ELK_SECURITY_ENABLED:-true}
+            -E xpack.security.transport.ssl.enabled=${ELK_TRANSPORT_SSL_ENABLED:-false}
+            -E xpack.security.http.ssl.enabled=${ELK_HTTP_SSL_ENABLED:-false}
+        # user: "1000:1000"  # 暂时注释掉，使用init容器设置权限
+        # privileged: true
+        environment:
+            TZ: ${TZ:-Asia/Shanghai}
+            # 只保留JVM设置，移除所有Elasticsearch配置参数
+            # 将 gc.log 输出到 logs 目录，避免权限问题（如果 ES_JAVA_OPTS 未设置 gc.log，则添加）
+            ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx1g}
+            # 设置 gc.log 输出路径（如果 ES_JAVA_OPTS 中未包含 gc.log 配置，则通过环境变量设置）
+            # 注意：Elasticsearch 默认会在工作目录创建 gc.log，我们需要确保它输出到 logs 目录
+            # 如果 ES_JAVA_OPTS 已经包含了 gc.log 配置，这个环境变量会被忽略
+            # 禁用AWS SDK日志记录来减少警告
+            AWS_SDK_LOAD_CONFIG: "false"
+            # 禁用 AWS 相关功能（解决权限错误）
+            AWS_PROFILE: ""
+            AWS_CONFIG_FILE: ""
+            AWS_SHARED_CREDENTIALS_FILE: ""
+            AWS_DEFAULT_REGION: ""
+            AWS_ACCESS_KEY_ID: ""
+            AWS_SECRET_ACCESS_KEY: ""
+            # 禁用 AWS 配置文件自动发现
+            AWS_EC2_METADATA_DISABLED: "true"
+            AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: ""
+            # 设置日志级别
+            ELASTIC_CONTAINER: "true"
+            # 禁用 S3 仓库插件
+            REPOSITORIES_S3_ENABLED: "false"
+            # 设置Elasticsearch密码
+            # 未设置 ELASTIC_PASSWORD 时回落到 KIBANA_ELASTICSEARCH_PASSWORD（兼容旧部署）
+            ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-${KIBANA_ELASTICSEARCH_PASSWORD:-}}
+            # 设置Kibana用户密码（用于初始化脚本）
+            KIBANA_ELASTICSEARCH_PASSWORD: ${KIBANA_ELASTICSEARCH_PASSWORD:-}
+            # 安全配置（通过环境变量控制）
+            ELK_SECURITY_ENABLED: ${ELK_SECURITY_ENABLED:-false}
+            ELK_TRANSPORT_SSL_ENABLED: ${ELK_TRANSPORT_SSL_ENABLED:-false}
+            ELK_HTTP_SSL_ENABLED: ${ELK_HTTP_SSL_ENABLED:-false}
+        volumes:
+            # 使用主机路径挂载（如果配置了），否则使用Docker volumes
+            # 完整路径 = ${DATA_PATH_HOST}/${ELASTICSEARCH_DATA_SUBDIR}（由 Compose 运行时拼装）
+            - ${ELASTICSEARCH_DATA_PATH:-${DATA_PATH_HOST}/${ELASTICSEARCH_DATA_SUBDIR}}:/usr/share/elasticsearch/data
+            - ${ELASTICSEARCH_LOG_DIR:-elasticsearch_logs}:/usr/share/elasticsearch/logs
+            # elasticsearch.yml 按环境自动选择：
+            #   开发环境（elk.dev.env）: ELASTICSEARCH_YML_FILE=../../build/elk/${ELK_BUILD_VERSION:-9.5}/elasticsearch/config/elasticsearch.dev.yml
+            #   生产环境（elk.prod.env）: ELASTICSEARCH_YML_FILE=../../build/elk/${ELK_BUILD_VERSION:-9.5}/elasticsearch/config/elasticsearch.prod.yml
+            # 若变量未设置，则回退到 elasticsearch.dev.yml（更安全的默认值）
+            - ${ELASTICSEARCH_YML_FILE:-../../build/elk/${ELK_BUILD_VERSION:-9.5}/elasticsearch/config/elasticsearch.dev.yml}:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+            - ${ELASTICSEARCH_CONF_DIR:-../../build/elk/${ELK_BUILD_VERSION:-9.5}/elasticsearch/config}/log4j2.properties:/usr/share/elasticsearch/config/log4j2.properties:ro
+            - ${ELASTICSEARCH_CONF_DIR:-../../build/elk/${ELK_BUILD_VERSION:-9.5}/elasticsearch/config}/certs:/usr/share/elasticsearch/config/certs:ro
+        hostname: elasticsearch
+        ports:
+            - "${ELK_BIND_HOST:-127.0.0.1}:${ELASTICSEARCH_HOST_PORT:-9200}:9200"
+            - "${ELK_BIND_HOST:-127.0.0.1}:${ELASTICSEARCH_HOST_PORT_S:-9300}:9300"
+        ulimits:
+            memlock:
+                soft: -1
+                hard: -1
+            nofile:
+                soft: 65536
+                hard: 65536
+            nproc:
+                # 宿主机 uid=1000 (euper) 已有约 4000 个线程（桌面/IDE 等），
+                # 容器以同一 uid=1000 运行，内核将两者线程数合并计入 RLIMIT_NPROC。
+                # 限制为 4096 时剩余配额不足以支撑 JVM 启动（G1GC + 线程池需 100+ 线程），
+                # 导致 pthread_create: EAGAIN。设为 -1 使容器使用系统级上限（1000000）。
+                soft: -1
+                hard: -1
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    'if [ "$$ELK_HTTP_SSL_ENABLED" = "true" ]; then curl -f -s -k -u elastic:$$ELASTIC_PASSWORD https://localhost:9200/_cluster/health 2>/dev/null; else curl -f -s -u elastic:$$ELASTIC_PASSWORD http://localhost:9200/_cluster/health 2>/dev/null; fi',
+                ]
+            interval: 30s
+            timeout: 15s
+            retries: 3
+            start_period: 120s
+        deploy:
+            resources:
+                limits:
+                    memory: "${ELASTICSEARCH_MEMORY_LIMIT:-4g}"
+                    cpus: "${ELASTICSEARCH_CPU_LIMIT:-2}"
+                reservations:
+                    memory: "${ELASTICSEARCH_MEMORY_RESERVATION:-1024m}"
+                    cpus: "${ELASTICSEARCH_CPU_RESERVATION:-0.5}"
+        networks:
+            - default
+
+    kibana:
+        <<: *default-common
+        container_name: kibana
+        image: hg_dnmpr_elk_kibana:latest
+        build:
+            context: ../..
+            dockerfile: build/elk/${ELK_BUILD_VERSION:-9.5}/kibana/Dockerfile
+            args:
+                ELK_VERSION: ${ELK_VERSION}
+                TINI_VERSION: ${TINI_VERSION:-v0.19.0}
+                CHANGE_SOURCE: ${CHANGE_SOURCE:-false}
+            network: host
+        environment:
+            TZ: "${TZ:-Asia/Shanghai}"
+            # Node.js 内存配置（重要：解决堆内存不足问题）
+            NODE_OPTIONS: "--max-old-space-size=1024"
+            # 服务器配置
+            SERVER_HOST: "0.0.0.0"
+            SERVER_PORT: 5601
+            SERVER_PUBLICBASEURL: ${KIBANA_PUBLIC_BASE_URL:-}
+            SERVER_BASEPATH: ${KIBANA_BASE_PATH:-}
+            # Elasticsearch 连接（使用kibana_system账号）
+            # 协议通过环境变量控制：dev=http, prod=https
+            ELASTICSEARCH_HOSTS: ${ELASTICSEARCH_PROTOCOL:-http}://elasticsearch:9200
+            ELASTICSEARCH_USERNAME: ${KIBANA_ELASTICSEARCH_USERNAME:-}
+            ELASTICSEARCH_PASSWORD: ${KIBANA_ELASTICSEARCH_PASSWORD:-}
+            # SSL（与 ES 通信）：勿重复定义同一 key；dev 见 elk.dev.env 中 ELK_SSL_VERIFICATIONMODE
+            ELASTICSEARCH_SSL_VERIFICATIONMODE: ${ELK_SSL_VERIFICATIONMODE:-certificate}
+            ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES: ${ELK_SSL_CERTIFICATE_AUTHORITIES:-}
+            ELASTICSEARCH_SSL_CERTIFICATE: ${ELK_SSL_CERTIFICATE:-}
+            ELASTICSEARCH_SSL_KEY: ${ELK_SSL_KEY:-}
+            # 本地化设置
+            I18N_LOCALE: "${KIBANA_I18N_LOCALE:-zh-CN}"
+            # 安全配置（禁用不必要的安全功能）
+            XPACK_SECURITY_ENCRYPTIONKEY: ${KIBANA_ENCRYPTION_KEY:-}
+            XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY: ${KIBANA_ENCRYPTION_KEY:-}
+            XPACK_REPORTING_ENCRYPTIONKEY: ${KIBANA_ENCRYPTION_KEY:-}
+            # 监控配置
+            XPACK_MONITORING_ENABLED: "false"
+            XPACK_MONITORING_KIBANA_COLLECTION_ENABLED: "false"
+            # 性能优化配置
+            LOGGING_ROOT_LEVEL: warn
+            TELEMETRY_ENABLED: "false"
+            TELEMETRY_OPTIN: "false"
+            # 内存和性能优化
+            SERVER_MAXPAYLOAD: "1048576"
+            # 毫秒；ES 冷启动/GC 时 1500 极易导致 Kibana 报 Request timed out
+            ELASTICSEARCH_PINGTIMEOUT: ${ELASTICSEARCH_PINGTIMEOUT:-60000}
+            ELASTICSEARCH_REQUESTTIMEOUT: ${ELASTICSEARCH_REQUESTTIMEOUT:-120000}
+            # 开发模式配置（可选）
+            ELASTICSEARCH_HOSTS_ALLOWFROMURL: "true"
+        volumes:
+            - ${KIBANA_CONF_DIR:-../../build/elk/${ELK_BUILD_VERSION:-9.5}/kibana/config}:/usr/share/kibana/config:ro
+            - ${ELASTICSEARCH_CONF_DIR:-../../build/elk/${ELK_BUILD_VERSION:-9.5}/elasticsearch/config}/certs:/usr/share/kibana/certs:ro
+            - kibana_data:/usr/share/kibana/data:rw
+        hostname: kibana
+        depends_on:
+            elasticsearch:
+                condition: service_healthy
+        ports:
+            - "${ELK_BIND_HOST:-127.0.0.1}:${KIBANA_HOST_PORT:-5601}:5601"
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    "curl -f --max-time 25 http://localhost:5601/api/status || exit 1",
+                ]
+            interval: 30s
+            timeout: 30s
+            retries: 5
+            start_period: 180s
+        deploy:
+            resources:
+                limits:
+                    memory: ${KIBANA_MEMORY_LIMIT:-2g}
+                    cpus: ${KIBANA_CPU_LIMIT:-2}
+                reservations:
+                    memory: ${KIBANA_MEMORY_RESERVATION:-512m}
+                    cpus: ${KIBANA_CPU_RESERVATION:-0.5}
+        networks:
+            - default
+
+    logstash:
+        <<: *default-common
+        container_name: logstash
+        image: hg_dnmpr_elk_logstash:latest
+        build:
+            context: ../..
+            dockerfile: build/elk/${ELK_BUILD_VERSION:-9.5}/logstash/Dockerfile
+            args:
+                ELK_VERSION: ${ELK_VERSION}
+                CHANGE_SOURCE: ${CHANGE_SOURCE:-false}
+            network: host
+        hostname: logstash
+        depends_on:
+            elasticsearch:
+                condition: service_healthy
+        environment:
+            TZ: ${TZ:-Asia/Shanghai}
+            NODE_NAME: logstash
+            PIPELINE_WORKERS: ${LOGSTASH_WORKERS:-2}
+            PIPELINE_BATCH_SIZE: ${LOGSTASH_BATCH_SIZE:-125}
+            PIPELINE_BATCH_DELAY: ${LOGSTASH_BATCH_DELAY:-50}
+            # 简化监控配置
+            XPACK_MONITORING_ENABLED: "false"
+            LS_JAVA_OPTS: "${LS_JAVA_OPTS:--Xms256m -Xmx512m}"
+            LOG_LEVEL: warn
+            # 通过环境变量配置 Logstash（避免文件系统权限问题）
+            CONFIG_RELOAD_AUTOMATIC: "true"
+            CONFIG_RELOAD_INTERVAL: "3s"
+            QUEUE_TYPE: "memory"
+            QUEUE_MAX_EVENTS: "1000"
+            # Elasticsearch认证配置（供Pipeline使用）
+            ELASTICSEARCH_PROTOCOL: ${ELASTICSEARCH_PROTOCOL:-http}
+            ELASTICSEARCH_USERNAME: ${LOGSTASH_ELASTICSEARCH_USERNAME:-}
+            # 口令与 LOGSTASH_ELASTICSEARCH_USERNAME 对应；未单独设置时按 ELASTIC_PASSWORD → KIBANA_ELASTICSEARCH_PASSWORD 回落
+            ELASTICSEARCH_PASSWORD: ${LOGSTASH_ELASTICSEARCH_PASSWORD:-${ELASTIC_PASSWORD:-${KIBANA_ELASTICSEARCH_PASSWORD:-}}}
+            ELASTICSEARCH_SSL_CERTIFICATE_AUTHORITY: /usr/share/logstash/config/certs/ca/ca.crt
+        volumes:
+            # 使用配置目录挂载，给予读写权限
+            - ${LOGSTASH_CONF_DIR:-../../build/elk/${ELK_BUILD_VERSION:-9.5}/logstash/config}:/usr/share/logstash/config:rw
+            # Pipeline 配置目录
+            - ${LOGSTASH_PIPELINE_CONF_DIR:-../../build/elk/${ELK_BUILD_VERSION:-9.5}/logstash/config/pipeline}:/usr/share/logstash/pipeline:ro
+            # SSL证书目录（生产环境需要）
+            - ${ELASTICSEARCH_CONF_DIR:-../../build/elk/${ELK_BUILD_VERSION:-9.5}/elasticsearch/config}/certs:/usr/share/logstash/config/certs:ro
+            # 数据和日志目录需要写权限
+            - logstash_data:/usr/share/logstash/data:rw
+            - logstash_logs:/usr/share/logstash/logs:rw
+        ports:
+            # 9600 为 Logstash 监控 API（无鉴权），可用 LOGSTASH_API_BIND_HOST 单独收敛
+            - "${LOGSTASH_API_BIND_HOST:-${ELK_BIND_HOST:-127.0.0.1}}:${LOGSTASH_HOST_PORT_C:-9600}:9600"
+            - "${ELK_BIND_HOST:-127.0.0.1}:${LOGSTASH_HOST_PORT_S:-5044}:5044"
+            - "${ELK_BIND_HOST:-127.0.0.1}:${LOGSTASH_HOST_PORT_TCP:-5000}:5000"
+            - "${ELK_BIND_HOST:-127.0.0.1}:${LOGSTASH_HOST_PORT_HTTP:-8050}:8000"
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    'curl -s http://localhost:9600/ | grep -q ''"status":"green"'' || exit 1',
+                ]
+            interval: 30s
+            timeout: 15s
+            retries: 3
+            start_period: 60s
+        deploy:
+            resources:
+                limits:
+                    memory: ${LOGSTASH_MEMORY_LIMIT:-1g}
+                    cpus: ${LOGSTASH_CPU_LIMIT:-1}
+                reservations:
+                    memory: ${LOGSTASH_MEMORY_RESERVATION:-256m}
+                    cpus: ${LOGSTASH_CPU_RESERVATION:-0.25}
+        networks:
+            - default
+
+networks:
+    default:
+        name: hg_dnmpr_network
+        external: true
+
+volumes:
+    elasticsearch_data:
+        driver: local
+    elasticsearch_logs:
+        driver: local
+    elasticsearch_certs:
+        driver: local
+    logstash_data:
+        driver: local
+    logstash_logs:
+        driver: local
+    kibana_data:
+        driver: local

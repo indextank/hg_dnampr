@@ -1,0 +1,78 @@
+# ==========================================
+# Docker 容器基础 MySQL 配置
+# ==========================================
+# 通用配置，环境特定配置通过环境变量和额外配置文件控制
+
+[mysqld]
+# ==========================================
+# 核心容器优化配置
+# ==========================================
+# 禁用 NUMA 优化，解决容器环境 mbind 权限问题（所有环境通用）
+innodb_numa_interleave = 0
+
+# ==========================================
+# 基础路径和文件配置
+# ==========================================
+# 数据目录
+datadir = /var/lib/mysql
+
+# Socket 文件配置
+socket = /tmp/mysql.sock
+mysqlx_socket = /tmp/mysqlx.sock
+
+# PID 文件
+pid_file = /var/run/mysqld/mysqld.pid
+
+# ==========================================
+# 日志文件路径配置
+# ==========================================
+log_error = /var/log/mysql/error.log
+
+# ==========================================
+# 字符集配置 (全局标准)
+# ==========================================
+character_set_server = utf8mb4
+collation_server = utf8mb4_unicode_ci
+init_connect = 'SET NAMES utf8mb4'
+
+# ==========================================
+# 基础网络配置
+# ==========================================
+bind_address = 0.0.0.0
+port = 3306
+mysqlx_bind_address = 0.0.0.0
+mysqlx_port = 33060
+
+# 跳过域名解析提升性能
+skip_name_resolve = 1
+
+# SSL/TLS 配置 - 容器默认配置
+# 这个设置会被环境特定配置文件覆盖
+require_secure_transport = OFF
+
+# ==========================================
+# 容器环境特定优化
+# ==========================================
+# 禁用主机缓存（skip_host_cache 启动选项已在 MySQL 8.4 移除，改用 host_cache_size=0）
+host_cache_size = 0
+
+# ==========================================
+# MySQL 9.x 认证
+# ==========================================
+# 9.0 起 mysql_native_password 插件及 mysql-native-password 选项已移除，
+# 写入该选项会导致 mysqld 因未知变量拒绝启动；统一使用默认的 caching_sha2_password。
+# 客户端须支持 caching_sha2_password（非 TLS 连接需允许获取服务端 RSA 公钥）。
+
+# ==========================================
+# 包含环境特定配置文件
+# ==========================================
+# 环境特定配置通过 Docker Compose 的 volumes 挂载
+# 开发环境：挂载 mysql-dev.cnf
+# 生产环境：挂载 mysql-prod.cnf
+
+[mysql]
+default_character_set = utf8mb4
+
+[client]
+default_character_set = utf8mb4
+socket = /tmp/mysql.sock
