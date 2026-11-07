@@ -16,6 +16,22 @@ dry_run_or_exec() {
     fi
 }
 
+# 安全执行「可能含空格」的命令头（如 COMPOSE_CMD="docker compose"）
+# 背景：全局 IFS=$'\n\t' 不含空格时，无引号展开 "$compose_cmd" 仍是一个词，
+#       dry_run_or_exec $compose_cmd ... 会变成 exec "docker compose" → command not found。
+# 用法: dry_run_or_exec_words "$compose_cmd" -f compose/stacks/elk.yaml restart elasticsearch kibana
+dry_run_or_exec_words() {
+    local _cmd_head="$1"
+    shift
+    local -a _argv=()
+    IFS=' ' read -r -a _argv <<< "${_cmd_head}"
+    if [[ ${#_argv[@]} -eq 0 ]]; then
+        echo "[ERROR] dry_run_or_exec_words: 空命令头" >&2
+        return 127
+    fi
+    dry_run_or_exec "${_argv[@]}" "$@"
+}
+
 # 执行 compose up 并过滤掉 podman-compose 在 detach 模式下输出的容器 ID 行
 # 用法: compose_up_quiet <完整 compose up 命令字符串> [detach_flag]
 # 只有在 detach("-d") 模式下才过滤，前台模式不过滤（保留实时日志输出）

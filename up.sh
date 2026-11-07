@@ -748,7 +748,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                 elk_containers=$(cr_cmd ps --filter "label=com.docker.compose.project=hg_dnmpr_elk" --format "{{.Names}}" | grep -E "elasticsearch|kibana|logstash" 2>/dev/null || echo "")
                 if [[ -n "$elk_containers" ]]; then
                     info "停止ELK服务..."
-                    dry_run_or_exec $compose_cmd -f compose/stacks/elk.yaml stop
+                    dry_run_or_exec_words "$compose_cmd" -f compose/stacks/elk.yaml stop
                 fi
             fi
 
@@ -757,7 +757,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
 
                 if [[ -n "$sgr_containers" ]]; then
                     info "停止SGR服务..."
-                    dry_run_or_exec $compose_cmd -f compose/stacks/sgr.yaml stop
+                    dry_run_or_exec_words "$compose_cmd" -f compose/stacks/sgr.yaml stop
                 fi
             fi
 
@@ -765,7 +765,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                 rabbitmq_containers=$(cr_cmd ps --filter "label=com.docker.compose.project=hg_dnmpr_rabbitmq" --format "{{.Names}}" | grep -E "rabbitmq|canal-server" 2>/dev/null || echo "")
                 if [[ -n "$rabbitmq_containers" ]]; then
                     info "停止RabbitMQ服务..."
-                    dry_run_or_exec $compose_cmd -f compose/stacks/rabbitmq.yaml stop
+                    dry_run_or_exec_words "$compose_cmd" -f compose/stacks/rabbitmq.yaml stop
                 fi
             fi
 
@@ -773,7 +773,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
                 syncer_containers=$(cr_cmd ps --filter "label=com.docker.compose.project=hg_dnmpr_syncer" --format "{{.Names}}" | grep -E "^syncer$" 2>/dev/null || echo "")
                 if [[ -n "$syncer_containers" ]]; then
                     info "停止Syncer服务..."
-                    dry_run_or_exec $compose_cmd -f compose/stacks/syncer.yaml stop
+                    dry_run_or_exec_words "$compose_cmd" -f compose/stacks/syncer.yaml stop
                 fi
             fi
 
@@ -812,25 +812,25 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             # 停止并删除ELK服务（如果存在）
             if [[ -f "compose/stacks/elk.yaml" ]]; then
                 info "停止并卸载ELK服务..."
-                dry_run_or_exec $compose_cmd -f compose/stacks/elk.yaml down 2>/dev/null || true
+                dry_run_or_exec_words "$compose_cmd" -f compose/stacks/elk.yaml down 2>/dev/null || true
             fi
 
             # 停止并删除SGR服务（如果存在）
             if [[ -f "compose/stacks/sgr.yaml" ]]; then
                 info "停止并卸载SGR服务..."
-                dry_run_or_exec $compose_cmd -f compose/stacks/sgr.yaml down 2>/dev/null || true
+                dry_run_or_exec_words "$compose_cmd" -f compose/stacks/sgr.yaml down 2>/dev/null || true
             fi
 
             # 停止并删除RabbitMQ服务（如果存在）
             if [[ -f "compose/stacks/rabbitmq.yaml" ]]; then
                 info "停止并卸载RabbitMQ服务..."
-                dry_run_or_exec $compose_cmd -f compose/stacks/rabbitmq.yaml down 2>/dev/null || true
+                dry_run_or_exec_words "$compose_cmd" -f compose/stacks/rabbitmq.yaml down 2>/dev/null || true
             fi
 
             # 停止并删除Syncer服务（如果存在）
             if [[ -f "compose/stacks/syncer.yaml" ]]; then
                 info "停止并卸载Syncer服务..."
-                dry_run_or_exec $compose_cmd -f compose/stacks/syncer.yaml down 2>/dev/null || true
+                dry_run_or_exec_words "$compose_cmd" -f compose/stacks/syncer.yaml down 2>/dev/null || true
             fi
 
             # 清理所有容器（包括不在当前项目中定义的）
@@ -971,9 +971,9 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
 
                     # 步骤3：重启ELK服务（如果存在）
                     if [[ ${#elk_services[@]} -gt 0 ]]; then
-                        info "步骤3: 重启ELK服务 (${elk_services[*]})"
+                        info "步骤3: 重启ELK服务 ($(format_services_inline "${elk_services[@]}"))"
                         if [[ -f "compose/stacks/elk.yaml" ]]; then
-                            dry_run_or_exec $compose_cmd -f compose/stacks/elk.yaml restart ${elk_services[*]}
+                            dry_run_or_exec_words "$compose_cmd" -f compose/stacks/elk.yaml restart "${elk_services[@]}"
                         else
                             warn "未找到 compose/stacks/elk.yaml 文件，跳过ELK服务重启"
                         fi
@@ -1004,9 +1004,9 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
 
                     # 重启ELK服务（如果存在）
                     if [[ ${#elk_services[@]} -gt 0 ]]; then
-                        info "重启ELK服务 (${elk_services[*]})"
+                        info "重启ELK服务 ($(format_services_inline "${elk_services[@]}"))"
                         if [[ -f "compose/stacks/elk.yaml" ]]; then
-                            dry_run_or_exec $compose_cmd -f compose/stacks/elk.yaml restart ${elk_services[*]}
+                            dry_run_or_exec_words "$compose_cmd" -f compose/stacks/elk.yaml restart "${elk_services[@]}"
                         else
                             warn "未找到 compose/stacks/elk.yaml 文件，跳过ELK服务重启"
                         fi
@@ -1017,9 +1017,9 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             else
                 # 没有运行中的主服务，检查是否有ELK服务需要重启
                 if [[ ${#elk_services[@]} -gt 0 ]]; then
-                    info "重启ELK服务 (${elk_services[*]})"
+                    info "重启ELK服务 ($(format_services_inline "${elk_services[@]}"))"
                     if [[ -f "compose/stacks/elk.yaml" ]]; then
-                        dry_run_or_exec $compose_cmd -f "compose/stacks/elk.yaml" restart ${elk_services[*]}
+                        dry_run_or_exec_words "$compose_cmd" -f "compose/stacks/elk.yaml" restart "${elk_services[@]}"
                         # ELK 服务不需要注册到 /etc/hosts，ELK-only 重启跳过 hosts 同步
                         success "ELK服务重启完成"
                     else

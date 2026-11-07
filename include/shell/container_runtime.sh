@@ -158,6 +158,27 @@ cr_cmd() {
     $CR_SUDO $CR "$@"
 }
 
+# 将 compose 命令串拆成 argv 数组（强制按空格拆分）
+# 背景：仓库全局 IFS=$'\n\t' 不含空格，"$COMPOSE_CMD"/"$compose_cmd" 无引号展开
+#       时 "docker compose" 仍是一个词，exec 会报 "docker compose: command not found"。
+# 用法: compose_split_cmd_arr _arr "docker compose"; "${_arr[@]}" version
+compose_split_cmd_arr() {
+    # shellcheck disable=SC2178
+    local -n __out_arr="$1"
+    local __cmd_str="${2:-}"
+    local -a __tmp=()
+    if [[ -z "${__cmd_str}" ]]; then
+        __cmd_str="$(get_docker_compose_cmd 2>/dev/null || true)"
+    fi
+    if [[ -z "${__cmd_str}" ]]; then
+        echo "错误: 未找到可用的 Compose 工具" >&2
+        return 1
+    fi
+    # 强制 IFS=' '，不受调用方全局 IFS 影响
+    IFS=' ' read -r -a __tmp <<< "${__cmd_str}"
+    __out_arr=("${__tmp[@]}")
+}
+
 # 执行 Compose 命令
 # 用法: compose_cmd up -d      等价于: docker compose up -d 或 podman-compose up -d
 compose_cmd() {
@@ -168,8 +189,11 @@ compose_cmd() {
         echo "错误: 未找到可用的 Compose 工具" >&2
         return 1
     fi
-    # COMPOSE_CMD 可能包含空格（如 "docker compose"），所以不用引号包裹
-    $COMPOSE_CMD "$@"
+    local -a _cc=()
+    local _head="${COMPOSE_CMD}"
+    [[ -n "${CR_SUDO:-}" ]] && _head="${CR_SUDO} ${COMPOSE_CMD}"
+    IFS=' ' read -r -a _cc <<< "${_head}"
+    "${_cc[@]}" "$@"
 }
 
 # 获取 compose 命令字符串（用于嵌套调用）
@@ -209,7 +233,9 @@ print_runtime_info() {
     local cr_ver
     cr_ver=$(cr_cmd --version 2>/dev/null | head -1 || echo "未知")
     local compose_ver
-    compose_ver=$($COMPOSE_CMD version 2>/dev/null | head -1 || echo "未知")
+    local -a _cc_ver=()
+    IFS=' ' read -r -a _cc_ver <<< "${CR_SUDO:+$CR_SUDO }$COMPOSE_CMD"
+    compose_ver=$("${_cc_ver[@]}" version 2>/dev/null | head -1 || echo "未知")
 
     echo "  容器运行时  : ${GREEN}${CR}${NC}    ${cr_ver}"
     echo "  Compose 工具 : ${GREEN}${COMPOSE_CMD}${NC}"

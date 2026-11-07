@@ -385,7 +385,7 @@ execute_compose_command() {
                 local _compose_cmd
                 _compose_cmd=$(get_docker_compose_cmd)
                 info "停止未启用的 monitoring exporter: ${_stale_exporters[*]}"
-                dry_run_or_exec $_compose_cmd -f compose/stacks/monitoring.yaml stop "${_stale_exporters[@]}" >/dev/null 2>&1 || true
+                dry_run_or_exec_words "$_compose_cmd" -f compose/stacks/monitoring.yaml stop "${_stale_exporters[@]}" >/dev/null 2>&1 || true
             fi
         fi
     fi

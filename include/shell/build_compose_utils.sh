@@ -185,7 +185,9 @@ check_prerequisites() {
     fi
 
     # 验证 Compose 可用
-    if ! $COMPOSE_CMD version &>/dev/null 2>&1; then
+    local -a _cc_chk=()
+    IFS=' ' read -r -a _cc_chk <<< "${COMPOSE_CMD}"
+    if ! "${_cc_chk[@]}" version &>/dev/null 2>&1; then
         error "Compose 命令 ($COMPOSE_CMD) 不可用"
     fi
 
