@@ -121,15 +121,18 @@ if command -v pv >/dev/null 2>&1; then
 fi
 
 # 恢复数据库文件并显示进度
-# ── SQL 流过滤器：剥离 GTID / SQL_LOG_BIN / DROP DATABASE / CREATE DATABASE / USE，并可选地将 SQL 中的库名引用从 rename_from 替换为 rename_to ──
+# ── SQL 流过滤器：剥离 GTID / DROP DATABASE / CREATE DATABASE / USE，并可选地将 SQL 中的库名引用从 rename_from 替换为 rename_to ──
 # 注意：必须剥离 DROP DATABASE。恢复时 mysql 以目标库为默认库连接，若执行备份中的
 #       DROP DATABASE（库名映射后即目标库），会话会失去默认库，后续语句报 ERROR 1046。
+# 防膨胀：会话强制 sql_log_bin=0，避免导入写入二进制日志（大库导入可省近 1:1 的磁盘）。
+#       仍剥离备份内自带的 SQL_LOG_BIN 行，防止与会话初始化冲突；由本函数统一注入 =0。
 # 用法：gunzip ... | _apply_sql_filters [rename_from] [rename_to] | mysql target_db
 _apply_sql_filters() {
     local rename_from="${1:-}"
     local rename_to="${2:-}"
     local _init
-    _init="SET SESSION innodb_strict_mode=0;"$'\n'"SET SESSION sql_mode='NO_ENGINE_SUBSTITUTION';"$'\n'
+    # sql_log_bin=0 需 SUPER / BINLOG_ADMIN；本脚本以 root 连接，导入场景安全。
+    _init="SET SESSION sql_log_bin=0;"$'\n'"SET SESSION innodb_strict_mode=0;"$'\n'"SET SESSION sql_mode='NO_ENGINE_SUBSTITUTION';"$'\n'
 
     if [ -n "$rename_from" ] && [ -n "$rename_to" ] && [ "$rename_from" != "$rename_to" ]; then
         { printf '%s' "$_init"; cat; } | \
@@ -149,6 +152,78 @@ _apply_sql_filters() {
             -e '/^CREATE DATABASE /d' \
             -e '/^USE /d'
     fi
+}
+
+# ── 二进制日志占用（GB，保留1位小数）；无法检测时输出 "?" ────────────────
+_mysql_binlog_size_gb() {
+    local bytes
+    bytes=$(docker exec "$MYSQL_CONTAINER_NAME" \
+        bash -lc 'du -sb /var/lib/mysql/binlog.* /var/lib/mysql/mysql-bin.* 2>/dev/null | awk "{s+=\$1} END {print s+0}"' \
+        2>/dev/null || echo "0")
+    bytes=$(printf '%s' "${bytes:-0}" | tr -cd '0-9')
+    if [ -z "$bytes" ]; then
+        echo "?"
+        return 1
+    fi
+    awk "BEGIN {printf \"%.1f\", ${bytes} / 1024 / 1024 / 1024}"
+}
+
+# ── 导入后空间清理：PURGE 二进制日志 + 报告磁盘 ──────────────────────────
+# 单机无复制场景可安全执行。有下游复制消费者时勿调用。
+# 参数：无。返回 0=清理完成（或无需清理），1=清理失败（不阻断上层成功态时可忽略）。
+_post_restore_space_cleanup() {
+    local before_gb after_gb free_gb
+    before_gb=$(_mysql_binlog_size_gb || true)
+    echo ""
+    echo "🧹 导入后空间清理（二进制日志）..."
+    if [ -n "$before_gb" ] && [ "$before_gb" != "?" ]; then
+        echo "  清理前 binlog 占用: ${before_gb} GB"
+    fi
+
+    if ! docker exec "$MYSQL_CONTAINER_NAME" \
+        mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" \
+        -e "PURGE BINARY LOGS BEFORE NOW();" 2>/dev/null; then
+        echo "  ⚠️  PURGE BINARY LOGS 失败（可能无 binlog 或权限不足），请手动检查"
+        return 1
+    fi
+
+    after_gb=$(_mysql_binlog_size_gb || true)
+    free_gb=$(_mysql_disk_free_gb || true)
+    if [ -n "$after_gb" ] && [ "$after_gb" != "?" ]; then
+        echo "  清理后 binlog 占用: ${after_gb} GB"
+    fi
+    if [ -n "$free_gb" ] && [ "$free_gb" != "?" ]; then
+        echo "  MySQL 数据目录可用: ${free_gb} GB"
+    fi
+    echo "  ✅ 二进制日志已清理"
+    return 0
+}
+
+# ── 可选：导入成功后删除源备份压缩包（默认询问）──────────────────────────
+# 参数：$1=备份文件路径
+_maybe_delete_restore_source() {
+    local backup_file="${1:-}"
+    local ans=""
+    [ -n "$backup_file" ] && [ -f "$backup_file" ] || return 0
+
+    # 非交互 / 显式跳过
+    if [ ! -t 0 ] || [ "${KEEP_RESTORE_SOURCE:-0}" = "1" ]; then
+        return 0
+    fi
+    if [ "${DELETE_RESTORE_SOURCE:-0}" = "1" ]; then
+        rm -f "$backup_file" && echo "🗑️  已删除源备份: $backup_file"
+        return 0
+    fi
+
+    read -r -p "是否删除已导入的源备份文件 $(basename "$backup_file")？[y/N]: " ans || true
+    case "${ans:-}" in
+        y|Y|yes|YES)
+            rm -f "$backup_file" && echo "🗑️  已删除源备份: $backup_file"
+            ;;
+        *)
+            echo "ℹ️  保留源备份: $backup_file（可用 DELETE_RESTORE_SOURCE=1 跳过询问并自动删除）"
+            ;;
+    esac
 }
 
 # ── MySQL 容器数据目录可用磁盘空间（GB，保留1位小数）；无法检测时输出 "?" ───
@@ -686,10 +761,14 @@ restore_with_auto_db() {
         target_db=$(extract_db_name_from_file "$backup_file")
     fi
 
+    local restore_rc=0
     if [ -z "$target_db" ]; then
         echo "⚠️  无法从文件头部检测到数据库名，尝试直接恢复（可能失败）..."
-        restore_file_with_progress "$backup_file"
-        return $?
+        restore_file_with_progress "$backup_file" || restore_rc=$?
+        if [ "$restore_rc" -eq 0 ] && [ "${SKIP_POST_RESTORE_CLEANUP:-0}" != "1" ]; then
+            _post_restore_space_cleanup || true
+        fi
+        return "$restore_rc"
     fi
 
     # ── 恢复前预检：检测 /var/lib/mysql 是否可写，errno:13 则自动修复 ──────
@@ -709,7 +788,12 @@ restore_with_auto_db() {
         -e "CREATE DATABASE IF NOT EXISTS \`${target_db}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" \
         2>/dev/null || true
 
-    restore_file_with_progress "$backup_file" "$target_db" "$rename_from"
+    restore_file_with_progress "$backup_file" "$target_db" "$rename_from" || restore_rc=$?
+    # 批量恢复时由外层统一清理一次，避免每个库都 PURGE
+    if [ "$restore_rc" -eq 0 ] && [ "${SKIP_POST_RESTORE_CLEANUP:-0}" != "1" ]; then
+        _post_restore_space_cleanup || true
+    fi
+    return "$restore_rc"
 }
 
 # 恢复单个数据库：
@@ -845,6 +929,7 @@ restore_single_db() {
 
     if restore_with_auto_db "$RESTORE_FILE" "$TARGET_DB" "$RENAME_FROM"; then
         echo "✅ 数据库 \`$TARGET_DB\` 恢复完成"
+        _maybe_delete_restore_source "$RESTORE_FILE"
     else
         echo "❌ 数据库 \`$TARGET_DB\` 恢复失败"
         return 1
@@ -1164,30 +1249,33 @@ rename_database() {
 
 restore_all_dbs() {
    # 默认使用 BACKUP_PATH，如果路径不存在或为空，则允许用户手动指定
+   # 注意：在 set -e + pipefail 下，不可用 `ls *.sql.gz | wc -l` 判断文件是否存在——
+   # 无匹配时 ls 非 0，管道失败会静默退出（选项 4 直接中断的根因）。
    if [ -z "$BACKUP_PATH" ] || [ ! -d "$BACKUP_PATH" ]; then
        echo "⚠️  默认备份路径不存在或为空: $BACKUP_PATH"
        read -p "请输入备份文件路径或目录: " BACKUP_FILE_PATH
    else
-       # 检查默认路径下是否有备份文件
-       BACKUP_FILES_COUNT=$(ls -1 "$BACKUP_PATH"/*.sql.gz 2>/dev/null | wc -l)
-       if [ "$BACKUP_FILES_COUNT" -eq 0 ]; then
+       # 与 restore_single_db 一致：用 `ls ... &&` 探测，失败不会触发 set -e
+       if ls "$BACKUP_PATH"/*.sql.gz >/dev/null 2>&1; then
+           echo "✅ 使用默认备份路径: $BACKUP_PATH"
+           BACKUP_FILE_PATH="$BACKUP_PATH"
+       else
            echo "⚠️  默认备份路径下没有找到备份文件: $BACKUP_PATH"
            read -p "请输入备份文件路径或目录（直接回车使用默认路径）: " BACKUP_FILE_PATH
-           # 如果用户没有输入，使用默认路径
            if [ -z "$BACKUP_FILE_PATH" ]; then
                BACKUP_FILE_PATH="$BACKUP_PATH"
            fi
-       else
-           # 默认路径存在且有备份文件，直接使用
-           echo "✅ 使用默认备份路径: $BACKUP_PATH"
-           BACKUP_FILE_PATH="$BACKUP_PATH"
        fi
    fi
 
    # 如果输入的是目录路径，列出可用的备份文件
    if [ -d "$BACKUP_FILE_PATH" ]; then
-       # 查找所有 .sql.gz 备份文件，按修改时间倒序排列（最新的在前）
-       BACKUP_FILES=($(ls -t "$BACKUP_FILE_PATH"/*.sql.gz 2>/dev/null))
+       BACKUP_FILES=()
+       # 先探测再赋值，避免无匹配时 ls 失败导致 set -e 退出
+       if ls "$BACKUP_FILE_PATH"/*.sql.gz >/dev/null 2>&1; then
+           # 按修改时间倒序排列（最新的在前）
+           BACKUP_FILES=($(ls -t "$BACKUP_FILE_PATH"/*.sql.gz 2>/dev/null))
+       fi
 
        if [ ${#BACKUP_FILES[@]} -eq 0 ]; then
            echo "❌ 目录中没有找到 .sql.gz 备份文件：$BACKUP_FILE_PATH"
@@ -1357,6 +1445,8 @@ restore_all_dbs() {
        local failed_count=0
 
        set +e
+       # 批量导入：每个库跳过即时 PURGE，全部完成后统一清理一次
+       SKIP_POST_RESTORE_CLEANUP=1
 
        for i in "${!FILES_TO_PROCESS[@]}"; do
            local backup_file="${FILES_TO_PROCESS[$i]}"
@@ -1381,7 +1471,12 @@ restore_all_dbs() {
            fi
        done
 
+       unset SKIP_POST_RESTORE_CLEANUP
        set -e
+
+       if [ "$success_count" -gt 0 ]; then
+           _post_restore_space_cleanup || true
+       fi
 
        echo ""
        echo "════════════════════════════════════════════════════════"
@@ -1528,16 +1623,21 @@ complete_cleanup_restore() {
 
     case $RESTORE_CHOICE in
         1)
-            # 自动找到最新的备份文件
-            LATEST_BACKUP=$(ls -t "$BACKUP_PATH"*_backup_*.sql.gz 2>/dev/null | head -1)
+            # 自动找到最新的备份文件（先探测再 ls，避免 set -e + pipefail 下无匹配时静默退出）
+            LATEST_BACKUP=""
+            if ls "$BACKUP_PATH"*_backup_*.sql.gz >/dev/null 2>&1; then
+                LATEST_BACKUP=$(ls -t "$BACKUP_PATH"*_backup_*.sql.gz 2>/dev/null | head -1)
+            fi
             if [ -n "$LATEST_BACKUP" ]; then
                 echo "找到最新备份文件: $LATEST_BACKUP"
                 echo "正在恢复所有数据库..."
-                gunzip < "$LATEST_BACKUP" | docker exec -i $MYSQL_CONTAINER_NAME \
-                mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>/dev/null
-
-                if [ $? -eq 0 ]; then
+                if gunzip < "$LATEST_BACKUP" | \
+                    _apply_sql_filters | \
+                    docker exec -i $MYSQL_CONTAINER_NAME \
+                    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>/dev/null; then
                     echo "✅ 所有数据库恢复完成！"
+                    _post_restore_space_cleanup || true
+                    _maybe_delete_restore_source "$LATEST_BACKUP"
                 else
                     echo "❌ 数据库恢复失败！"
                 fi
@@ -1549,13 +1649,13 @@ complete_cleanup_restore() {
             read -p "输入备份文件路径: " BACKUP_FILE_PATH
             if [ -f "$BACKUP_FILE_PATH" ]; then
                 echo "正在恢复所有数据库..."
-                gunzip < "$BACKUP_FILE_PATH" | \
-                sed -e '/^SET @@GLOBAL.GTID_PURGED=/d' -e '/^SET @@SESSION.SQL_LOG_BIN=/d' | \
-                docker exec -i $MYSQL_CONTAINER_NAME \
-                mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>/dev/null
-
-                if [ $? -eq 0 ]; then
+                if gunzip < "$BACKUP_FILE_PATH" | \
+                    _apply_sql_filters | \
+                    docker exec -i $MYSQL_CONTAINER_NAME \
+                    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>/dev/null; then
                     echo "✅ 所有数据库恢复完成！"
+                    _post_restore_space_cleanup || true
+                    _maybe_delete_restore_source "$BACKUP_FILE_PATH"
                 else
                     echo "❌ 数据库恢复失败！"
                 fi
