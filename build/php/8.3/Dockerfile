@@ -347,7 +347,7 @@ ENV APACHE_LOCK_DIR=/var/lock/apache2
 # 复制PHP构建脚本和配置工具
 COPY ./build/php/common/ext-debian.sh ${TMP_DIR}/
 COPY ./build/php/common/docker-php-* /usr/local/bin/
-# 复制Composer官方安装脚本（含 sha384 校验与下载重试机制）
+# 复制 Composer 安装脚本（curl 直装 phar + sha256 校验；兼容 socks5h 构建代理）
 COPY ./include/shell/install-composer.sh /tmp/install-composer.sh
 
 # 设置Apache目录和PHP INI目录
@@ -516,13 +516,12 @@ RUN set -eux; \
 	echo "PHP扩展安装完成" | tee -a "$BUILD_LOG"; \
 	echo "=========================================" | tee -a "$BUILD_LOG"; \
 	\
-	# 安装Composer（官方安装器 + sha384 完整性校验 + 下载重试机制） \
+	# 安装 Composer（curl 直装 phar + sha256；脚本内已离线验证 --version） \
 	echo "=========================================" | tee -a "$BUILD_LOG"; \
 	echo "开始安装Composer" | tee -a "$BUILD_LOG"; \
 	echo "=========================================" | tee -a "$BUILD_LOG"; \
 	cd /tmp; \
 	COMPOSER_INSTALL_LOG="$BUILD_LOG" sh /tmp/install-composer.sh; \
-	composer --version 2>&1 | tee -a "$BUILD_LOG"; \
 	echo "✓ Composer 安装完成" | tee -a "$BUILD_LOG"; \
 	\
 	# 更新PECL通道

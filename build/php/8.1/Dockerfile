@@ -151,7 +151,7 @@ COPY ./src/php/ ${TMP_DIR}
 COPY ./src/openssl/openssl-${OPENSSL_VERSION}.tar.gz ${TMP_DIR}/
 COPY ./build/php/common/docker-php-* /usr/local/bin/
 COPY ./include/shell/download-helper.sh /tmp/download-helper.sh
-# 复制Composer官方安装脚本（含 sha384 校验与下载重试机制）
+# 复制 Composer 安装脚本（curl 直装 phar + sha256 校验；兼容 socks5h 构建代理）
 COPY ./include/shell/install-composer.sh /tmp/install-composer.sh
 # PECL 频道注册表修复脚本（规避 PEAR 1.10.13 解析 channel.xml 时的 ETag 前缀污染）
 COPY ./include/shell/fix-pecl-channel.php /tmp/fix-pecl-channel.php
@@ -522,7 +522,7 @@ RUN set -eux; \
 			git config --global --add safe.directory "*"; \
 		fi; \
 		\
-		# 安装Composer（官方安装器 + sha384 完整性校验 + 下载重试机制） \
+		# 安装 Composer（curl 直装 phar + sha256；脚本内已离线验证 --version） \
 		sh /tmp/install-composer.sh; \
 		\
 		if [ -f "/usr/local/bin/pecl" ]; then \

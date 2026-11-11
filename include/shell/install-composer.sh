@@ -1,18 +1,25 @@
 #!/bin/sh
-# Composer 官方安装脚本（供所有 PHP 版本镜像构建使用）
+# Composer 安装脚本（供所有 PHP 版本镜像构建使用）
 #
-# 流程（与 Composer 官方文档推荐流程一致）：
-#   1. 下载官方安装器签名（installer.sig，sha384，随安装器版本动态变化，必须实时获取）
-#   2. 下载官方安装器 composer-setup.php（等效于 php -r "copy('https://getcomposer.org/installer', ...)")
-#   3. sha384 完整性校验（等效于 php -r "if (hash_file('sha384', ...) === ...) ..."）
-#   4. 执行安装：php composer-setup.php --install-dir=/usr/local/bin --filename=composer
-#   5. 清理安装器，并对安装结果做最终验证（phar 签名损坏时直接失败，中断构建）
+# 全程用 curl 下载 composer.phar（curl 支持 socks5h/http 代理），
+# 避免 php streams / composer-setup.php 在 SOCKS 代理下失败：
+#   Failed to open stream: Unable to find the socket transport "socks5h"
+#
+# 流程：
+#   1. curl 下载官方 latest-stable 的 sha256sum
+#   2. curl 下载 composer.phar（官方优先；失败回退国内镜像，仍用官方 sha256 校验）
+#   3. sha256 完整性校验（本地，不经 PHP 网络）
+#   4. 安装到 /usr/local/bin/composer
+#   5. 离线验证 --version（清空代理 + COMPOSER_DISABLE_NETWORK，防止 PHP 再走 socks）
 #
 # 网络抖动防护：所有下载最多重试 5 次，每次重试间隔 3 秒。
 set -eu
 
 RETRY_MAX=5
 RETRY_DELAY=3
+COMPOSER_BIN="/usr/local/bin/composer"
+PHAR_PATH="/tmp/composer.phar"
+SUM_PATH="/tmp/composer.phar.sha256sum"
 
 log_msg() {
     if [ -n "${COMPOSER_INSTALL_LOG:-}" ]; then
@@ -41,53 +48,73 @@ download_with_retry() {
     return 1
 }
 
-INSTALLER_SIG_PATH="/tmp/composer-installer.sig"
-INSTALLER_PATH="/tmp/composer-setup.php"
+# PHP streams 不支持 socks5h；验证阶段禁止 Composer/PHP 走代理网络
+run_composer_offline() {
+    env \
+        HTTP_PROXY= \
+        HTTPS_PROXY= \
+        ALL_PROXY= \
+        http_proxy= \
+        https_proxy= \
+        all_proxy= \
+        COMPOSER_DISABLE_NETWORK=1 \
+        php "${COMPOSER_BIN}" "$@"
+}
 
-rm -f "${INSTALLER_SIG_PATH}" "${INSTALLER_PATH}"
+rm -f "${PHAR_PATH}" "${SUM_PATH}"
 
-# 1. 下载官方安装器签名（sha384 校验依据）
-if ! download_with_retry "https://composer.github.io/installer.sig" "${INSTALLER_SIG_PATH}"; then
-    log_msg "ERROR: 无法下载 Composer 安装器签名文件。"
+# 1. 下载官方 sha256 校验文件
+if ! download_with_retry \
+    "https://getcomposer.org/download/latest-stable/composer.phar.sha256sum" \
+    "${SUM_PATH}"; then
+    log_msg "ERROR: 无法下载 Composer sha256sum。"
     exit 1
 fi
 
-# 2. 下载官方安装器（优先官方源；失败时回退腾讯云镜像，但仍使用官方签名校验完整性）
-if download_with_retry "https://getcomposer.org/installer" "${INSTALLER_PATH}"; then
-    log_msg "Official Composer installer downloaded."
-elif download_with_retry "https://mirrors.tencent.com/composer/composer-setup.php" "${INSTALLER_PATH}"; then
-    log_msg "WARN: 官方源不可用，已回退至腾讯云镜像（仍执行官方 sha384 签名校验）。"
+# 2. 下载 composer.phar（官方优先；镜像回退）
+if download_with_retry \
+    "https://getcomposer.org/download/latest-stable/composer.phar" \
+    "${PHAR_PATH}"; then
+    log_msg "Official Composer phar downloaded."
+elif download_with_retry \
+    "https://mirrors.tencent.com/composer/composer.phar" \
+    "${PHAR_PATH}"; then
+    log_msg "WARN: 官方源不可用，已回退至腾讯云镜像（仍执行官方 sha256 校验）。"
+elif download_with_retry \
+    "https://mirrors.aliyun.com/composer/composer.phar" \
+    "${PHAR_PATH}"; then
+    log_msg "WARN: 官方/腾讯云不可用，已回退至阿里云镜像（仍执行官方 sha256 校验）。"
 else
-    log_msg "ERROR: 无法下载 Composer 安装器。"
+    log_msg "ERROR: 无法下载 Composer phar。"
+    rm -f "${SUM_PATH}"
     exit 1
 fi
 
-# 3. sha384 完整性校验
-EXPECTED_CHECKSUM="$(tr -d '\r\n' < "${INSTALLER_SIG_PATH}")"
-ACTUAL_CHECKSUM="$(php -r "echo hash_file('sha384', '${INSTALLER_PATH}');")"
-rm -f "${INSTALLER_SIG_PATH}"
-if [ -z "${EXPECTED_CHECKSUM}" ] || [ "${#EXPECTED_CHECKSUM}" -ne 96 ] || [ "${EXPECTED_CHECKSUM}" != "${ACTUAL_CHECKSUM}" ]; then
-    log_msg "ERROR: Installer corrupt (sha384 校验失败)。"
-    rm -f "${INSTALLER_PATH}"
+# 3. sha256 完整性校验（官方 sum 文件格式: "<hash>  composer.phar" 或 "<hash> *composer.phar"）
+EXPECTED_CHECKSUM="$(awk 'NF>=1 { print $1; exit }' "${SUM_PATH}" | tr -d '\r\n')"
+ACTUAL_CHECKSUM="$(sha256sum "${PHAR_PATH}" | awk '{ print $1 }')"
+rm -f "${SUM_PATH}"
+if [ -z "${EXPECTED_CHECKSUM}" ] || [ "${#EXPECTED_CHECKSUM}" -ne 64 ] \
+    || [ -z "${ACTUAL_CHECKSUM}" ] || [ "${EXPECTED_CHECKSUM}" != "${ACTUAL_CHECKSUM}" ]; then
+    log_msg "ERROR: Composer phar corrupt (sha256 校验失败)。"
+    log_msg "ERROR: expected=${EXPECTED_CHECKSUM:-<empty>} actual=${ACTUAL_CHECKSUM:-<empty>}"
+    rm -f "${PHAR_PATH}"
     exit 1
 fi
-log_msg "Installer verified."
+log_msg "Composer phar verified (sha256)."
 
-# 4. 执行官方安装器，安装到系统路径
-php "${INSTALLER_PATH}" --install-dir=/usr/local/bin --filename=composer
-RESULT=$?
-rm -f "${INSTALLER_PATH}"
-if [ "${RESULT}" -ne 0 ] || [ ! -f /usr/local/bin/composer ]; then
-    log_msg "ERROR: Composer 安装失败。"
+# 4. 安装到系统路径
+install -m 755 "${PHAR_PATH}" "${COMPOSER_BIN}"
+rm -f "${PHAR_PATH}"
+if [ ! -f "${COMPOSER_BIN}" ]; then
+    log_msg "ERROR: Composer 安装失败（目标文件不存在）。"
     exit 1
 fi
-chmod +x /usr/local/bin/composer
 
-# 5. 最终验证：phar 文件不完整/签名损坏时该命令会抛 PharException 失败，直接中断构建，
-#    避免带有 broken signature 的 composer 进入镜像
-if ! php /usr/local/bin/composer --version; then
+# 5. 离线验证：phar 损坏时 php 会抛 PharException；禁用网络避免 socks5h 误触发
+if ! run_composer_offline --version; then
     log_msg "ERROR: Composer 安装后验证失败（可能存在签名损坏）。"
-    rm -f /usr/local/bin/composer
+    rm -f "${COMPOSER_BIN}"
     exit 1
 fi
 log_msg "Composer installed successfully."
