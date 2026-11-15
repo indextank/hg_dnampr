@@ -144,6 +144,10 @@ services:
 
             # PHP配置
             - ${PHP85_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+            # hardening：版本目录优先，缺失时 derive 回落 common（覆盖 php.ini 同名项）
+            - ${PHP85_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
+            # OPcache：全版本统一 common/opcache.ini
+            - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
             # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
 
@@ -237,6 +241,8 @@ services:
 
             # PHP配置
             - ${PHP84_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+            - ${PHP84_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
+            - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
             # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
 
@@ -319,6 +325,8 @@ services:
             - ../../logs/php-extensions:/var/log/php-extensions:rw,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP83_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+            - ${PHP83_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
+            - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
             # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
             - php_sessions:/tmp/php_sessions:rw
@@ -393,6 +401,8 @@ services:
             - ../../logs/php-extensions:/var/log/php-extensions:rw,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP82_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+            - ${PHP82_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
+            - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
             # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
             - php_sessions:/tmp/php_sessions:rw
@@ -461,6 +471,8 @@ services:
             - ../../logs/php-extensions:/var/log/php-extensions:rw,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP81_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+            - ${PHP81_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
+            - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
             # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
             - php_sessions:/tmp/php_sessions:rw
@@ -527,6 +539,8 @@ services:
             - ../../logs/php-extensions:/var/log/php-extensions:rw,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP80_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+            - ${PHP80_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
+            - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
             # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
             - php_sessions:/tmp/php_sessions:rw
@@ -593,6 +607,8 @@ services:
             - ../../logs/php-extensions:/var/log/php-extensions:rw,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP74_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+            - ${PHP74_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
+            - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
             # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
             - php_sessions:/tmp/php_sessions:rw

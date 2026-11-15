@@ -606,6 +606,9 @@ load_config_files() {
     derive_valkey_build_ver
     derive_redis_conf_paths
 
+    # PHP：hardening.ini（版本优先 / common 兜底）+ 统一 opcache.ini
+    derive_php_ini_overlay_paths
+
     # ELK：按 ELK_BUILD_VERSION 解析通道最新版 → ELK_VERSION，并派生配置路径
     derive_elk_build_ver
     derive_elk_conf_paths
@@ -776,6 +779,46 @@ derive_redis_conf_paths() {
         export REDIS_CONF_FILE="../../build/redis/${REDIS_BUILD_VERSION:-8.10}/redis.conf"
     fi
     unset _base
+}
+
+# PHP conf.d 覆盖：版本目录 hardening.ini 优先，缺失则回落 common/hardening.ini；
+# 全版本统一挂载 common/opcache.ini。路径相对 compose/stacks（../../build/...）。
+# 用途：启动时以 conf.d/zz-*.ini 覆盖 php.ini 中对应项（disable_functions / expose_php / opcache 等）。
+derive_php_ini_overlay_paths() {
+    local _php_root="${BUILD_ROOT:-${PROJECT_DIR:-}/build}/php"
+    local _common_hardening_abs="${_php_root}/common/hardening.ini"
+    local _common_hardening_rel="../../build/php/common/hardening.ini"
+    local _common_opcache_abs="${_php_root}/common/opcache.ini"
+    local _common_opcache_rel="../../build/php/common/opcache.ini"
+    local _ver _tag _var _ver_abs _ver_rel
+
+    if [[ -z "${PHP_OPCACHE_INI_FILE:-}" ]]; then
+        export PHP_OPCACHE_INI_FILE="${_common_opcache_rel}"
+    fi
+    if [[ ! -f "${_common_opcache_abs}" ]]; then
+        error "缺少 ${_common_opcache_abs}（全版本 PHP 必须加载 opcache.ini）"
+    fi
+
+    for _ver in 7.4 8.0 8.1 8.2 8.3 8.4 8.5; do
+        _tag="${_ver//./}"
+        _var="PHP${_tag}_HARDENING_INI_FILE"
+        _ver_abs="${_php_root}/${_ver}/hardening.ini"
+        _ver_rel="../../build/php/${_ver}/hardening.ini"
+
+        if [[ -f "${_ver_abs}" ]]; then
+            printf -v "${_var}" '%s' "${_ver_rel}"
+            export "${_var?}"
+        elif [[ -f "${_common_hardening_abs}" ]]; then
+            printf -v "${_var}" '%s' "${_common_hardening_rel}"
+            export "${_var?}"
+            warn "PHP ${_ver}：未找到 build/php/${_ver}/hardening.ini，回落 common/hardening.ini"
+        else
+            error "PHP ${_ver}：hardening.ini 缺失（版本目录与 common 均无）"
+        fi
+    done
+    unset _php_root _common_hardening_abs _common_hardening_rel
+    unset _common_opcache_abs _common_opcache_rel
+    unset _ver _tag _var _ver_abs _ver_rel
 }
 
 # 按 ELK_BUILD_VERSION 解析通道最新版 → ELK_VERSION；TINI 默认 v0.19.0（官方仍在用）

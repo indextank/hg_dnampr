@@ -167,6 +167,11 @@ load_environment_variables() {
         derive_redis_conf_paths
     fi
 
+    # PHP：hardening.ini（版本优先 / common 兜底）+ 统一 opcache.ini
+    if declare -F derive_php_ini_overlay_paths >/dev/null 2>&1; then
+        derive_php_ini_overlay_paths
+    fi
+
     # ELK：按 ELK_BUILD_VERSION 解析通道最新版 → ELK_VERSION，并派生配置路径
     if declare -F derive_elk_build_ver >/dev/null 2>&1; then
         derive_elk_build_ver
@@ -231,6 +236,9 @@ _normalize_project_relative_env_paths() {
             APACHE_LOG_DIR APACHE_VHOST_DIR
             PHP74_PHP_CONF_FILE PHP80_PHP_CONF_FILE PHP81_PHP_CONF_FILE
             PHP82_PHP_CONF_FILE PHP83_PHP_CONF_FILE PHP84_PHP_CONF_FILE PHP85_PHP_CONF_FILE
+            PHP74_HARDENING_INI_FILE PHP80_HARDENING_INI_FILE PHP81_HARDENING_INI_FILE
+            PHP82_HARDENING_INI_FILE PHP83_HARDENING_INI_FILE PHP84_HARDENING_INI_FILE PHP85_HARDENING_INI_FILE
+            PHP_OPCACHE_INI_FILE
             REDIS_CONF_FILE REDIS_LOG_DIR VALKEY_DATA_DIR REDIS_DATA_DIR
             ELASTICSEARCH_YML_FILE ELASTICSEARCH_CONF_DIR KIBANA_CONF_DIR
             LOGSTASH_CONF_DIR LOGSTASH_PIPELINE_CONF_DIR RABBITMQ_LOG_DIR
