@@ -207,6 +207,7 @@ ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/etc/ngin
 
 COPY ./build/nginx/1.30/config/nginx.conf /etc/nginx/conf/
 COPY ./build/nginx/1.30/config/mime.types /etc/nginx/conf/mime.types
+COPY ./build/nginx/1.30/config/snippets/ /etc/nginx/conf/snippets/
 COPY ./vhost/nginx_vhost/certs/* /etc/nginx/conf/ssl/
 
 COPY ./build/nginx/1.30/docker-entrypoint.sh /

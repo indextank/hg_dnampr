@@ -27,6 +27,9 @@ name: hg_dnmpr_monitoring
 networks:
     hg_dnmpr_network:
         external: true
+    # DB/缓存后端网络（与主栈 backend 同名）；exporter类 exporter 需接入才能 scrape
+    hg_dnmpr_backend:
+        external: true
 
 # ---------------------------------------------------------------------------
 # Persistent volumes
@@ -224,7 +227,7 @@ services:
                 EOF
                 exec /bin/mysqld_exporter --config.my-cnf=/tmp/.my.cnf
         networks:
-            - hg_dnmpr_network
+            - hg_dnmpr_backend
 
     mongo-exporter:
         <<: [*monitoring-env, *monitoring-logging]
@@ -235,7 +238,7 @@ services:
             - "--mongodb.uri=mongodb://${MONGO_INITDB_ROOT_USERNAME:-}:${MONGO_INITDB_ROOT_PASSWORD:-}@mongo:27017/admin"
             - "--collect-all"
         networks:
-            - hg_dnmpr_network
+            - hg_dnmpr_backend
 
     postgres-exporter:
         <<: [*monitoring-env, *monitoring-logging]
@@ -245,7 +248,7 @@ services:
         environment:
             DATA_SOURCE_NAME: "postgresql://${PG_USER:-}:${PG_PASSWORD:-}@postgres:5432/postgres?sslmode=disable"
         networks:
-            - hg_dnmpr_network
+            - hg_dnmpr_backend
 
     redis-exporter:
         <<: *monitoring-logging
@@ -255,7 +258,7 @@ services:
         environment:
             REDIS_ADDR: "redis://redis:6379"
         networks:
-            - hg_dnmpr_network
+            - hg_dnmpr_backend
 
     valkey-exporter:
         <<: *monitoring-logging
@@ -265,7 +268,7 @@ services:
         environment:
             REDIS_ADDR: "redis://valkey:6379"
         networks:
-            - hg_dnmpr_network
+            - hg_dnmpr_backend
 
     nginx-exporter:
         <<: *monitoring-logging
@@ -295,7 +298,7 @@ services:
         environment:
             DATA_SOURCE_NAME: "postgresql://${TIMESCALE_USER:-postgres}:${TIMESCALE_PASSWORD:-}@timescaledb:5432/postgres?sslmode=disable"
         networks:
-            - hg_dnmpr_network
+            - hg_dnmpr_backend
 
     pgvector-exporter:
         <<: [*monitoring-env, *monitoring-logging]
@@ -305,7 +308,7 @@ services:
         environment:
             DATA_SOURCE_NAME: "postgresql://${PGVECTOR_USER:-postgres}:${PGVECTOR_PASSWORD:-}@pgvector:5432/postgres?sslmode=disable"
         networks:
-            - hg_dnmpr_network
+            - hg_dnmpr_backend
 
     clickhouse-exporter:
         <<: [*monitoring-env, *monitoring-logging]
@@ -319,7 +322,7 @@ services:
         # 此容器仅用于保持服务清单完整性与 file_sd target 引用一致性。
         entrypoint: ["echo", "clickhouse-exporter placeholder (metrics served by clickhouse:9362)"]
         networks:
-            - hg_dnmpr_network
+            - hg_dnmpr_backend
 
     # ── Prometheus ────────────────────────────────────────────────────────────
     prometheus:
@@ -364,6 +367,7 @@ services:
 
         networks:
             - hg_dnmpr_network
+            - hg_dnmpr_backend
 
         healthcheck:
             test:

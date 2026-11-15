@@ -2415,6 +2415,11 @@ configure_docker_data_path() {
         # - docker.1ms.run 可用且速度快，作为首选
         # - docker.m.daocloud.io 已将 blob 重定向到 Docker Hub 官方 CDN，仅作兜底
         # - dockerproxy.com / mirror.baidubce.com / docker.nju.edu.cn 均已停服，移除
+        #
+        # iptables:false：本安装路径依赖宿主自建 nft（DNAT/FORWARD）替代 Docker 链，
+        # 与自定义 FORWARD 策略并存时不要改回 true（会双写规则、行为不可预期）。
+        # 容器东西向隔离请用 compose 网络拆分（hg_dnmpr_backend），勿指望 Docker iptables。
+        # 当前运行中的 daemon.json 若省略该键，则默认为 true——以实测为准。
         echo "{
     \"registry-mirrors\": [
         \"https://docker.1ms.run\",

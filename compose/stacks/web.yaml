@@ -1,143 +1,151 @@
 version: '3'
 
 x-healthcheck: &default-healthcheck
-  interval: 30s
-  timeout: 10s
-  retries: 3
-  start_period: 30s
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 30s
 
 x-common-variables: &default-common
-  restart: unless-stopped # 更稳定的重启策略
-  env_file:
-    - ${ENV_DIR:-../../env}/base.env
-    - ${ENV_DIR:-../../env}/web.env
-    - ${ENV_DIR:-../../env}/php.env
-    - ${ENV_DIR:-../../env}/mysql.env
-    - ${ENV_DIR:-../../env}/postgres.env
-    - ${ENV_DIR:-../../env}/mongodb.env
-    - ${ENV_DIR:-../../env}/redis.env
-    - ${ROOT_ENV_FILE:-../../.env}
-    - ${ENV_DIR:-../../env}/container-strip-host-proxy.env
-  dns:
-    - ${DNS_PRIMARY:-223.5.5.5}
-    - ${DNS_SECONDARY:-114.114.114.114}
-  dns_opt:
-    - use-vc
-    - timeout:2
-    - attempts:3
-  # ICMP(ping) 需要 CAP_NET_RAW，显式声明避免运行环境默认能力收紧。
-  cap_add:
-    - NET_RAW
+    restart: unless-stopped # 更稳定的重启策略
+    env_file:
+        - ${ENV_DIR:-../../env}/base.env
+        - ${ENV_DIR:-../../env}/web.env
+        - ${ENV_DIR:-../../env}/php.env
+        - ${ENV_DIR:-../../env}/mysql.env
+        - ${ENV_DIR:-../../env}/postgres.env
+        - ${ENV_DIR:-../../env}/mongodb.env
+        - ${ENV_DIR:-../../env}/redis.env
+        - ${ROOT_ENV_FILE:-../../.env}
+        - ${ENV_DIR:-../../env}/container-strip-host-proxy.env
+    dns:
+        - ${DNS_PRIMARY:-223.5.5.5}
+        - ${DNS_SECONDARY:-114.114.114.114}
+    dns_opt:
+        - use-vc
+        - timeout:2
+        - attempts:3
+    # ICMP(ping) 需要 CAP_NET_RAW，显式声明避免运行环境默认能力收紧。
+    cap_add:
+        - NET_RAW
 
 services:
-  ################   nginx #######################################
-  nginx-server:
-    <<: *default-common
-    container_name: nginx
-    image: hg_dnmpr_nginx:latest
-    build:
-      context: ../..
-      dockerfile: build/nginx/1.30/Dockerfile
-      args:
-        CHANGE_SOURCE: ${CHANGE_SOURCE}
-        NGINX_VERSION: ${NGINX_VERSION}
-        OPENSSL_VERSION: ${OPENSSL_VERSION}
-        HMNM_VERSION: ${HEADERS_MORE_NGINX_MODULE_VERSION}
-        PCRE_VERSION: ${PCRE_VERSION}
-        NGX_BROTLI_VERSION: ${NGX_BROTLI_VERSION}
-        NGX_ZSTD_VERSION: ${NGX_ZSTD_VERSION}
-        NGINX_ENABLE_BROTLI: ${NGINX_ENABLE_BROTLI}
-        NGINX_ENABLE_ZSTD: ${NGINX_ENABLE_ZSTD}
-      network: host # 使用主机网络解决DNS问题
-    ports:
-      - '${NGINX_HTTP_HOST_PORT}:80'
-      - '${NGINX_HTTPS_HOST_PORT}:443'
-    privileged: true
-    volumes:
-      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw
-      # 仅挂载虚拟主机到 conf.d；切勿挂载到 /etc/nginx/conf/，否则会覆盖镜像内的
-      # mime.types、proxy.conf、fastcgi_params 等，导致 nginx 启动失败。
-      - ${NGINX_VHOST_DIR}:/etc/nginx/conf.d/:rw
-      - ${NGINX_CONF_FILE}:/etc/nginx/conf/nginx.conf:ro
-      - ${NGINX_MIME_TYPES_FILE:-../../build/nginx/1.30/config/mime.types}:/etc/nginx/conf/mime.types:ro
-      - ${NGINX_LOG_DIR}:/var/log/nginx/:rw
-    environment:
-      SET_CONTAINER_TIMEZONE: 'true'
-      CONTAINER_TIMEZONE: ${TZ}
-    healthcheck:
-      <<: *default-healthcheck
-      test: ['CMD', 'curl', '--fail', 'http://localhost/nginx_status'] # 或者针对Tengine使用 appropriate Tengine status endpoint
-      # test: ["CMD", "curl", "--fail", "--max-time", "5", "http://localhost/"]
-    deploy:
-      resources:
-        limits:
-          cpus: ${NGINX_LIMITS_CPU:-0.5} # 默认0.5 CPU核心
-          memory: ${NGINX_LIMITS_MEMORY:-256M} # 默认256MB内存
-        reservations:
-          cpus: ${NGINX_RESERVATIONS_CPU:-0.25} # 默认预留0.25 CPU核心
-          memory: ${NGINX_RESERVATIONS_MEMORY:-128M} # 默认预留128MB内存
-    depends_on:
-      php74_apache:
-        condition: service_healthy
-      # php82_apache:
-      #   condition: service_healthy
-      php84_apache:
-        condition: service_healthy
-    #     php85_apache:
-    #         condition: service_healthy
-    restart: unless-stopped # 或 always
-    networks:
-      - default
+    ################   nginx #######################################
+    nginx-server:
+        <<: *default-common
+        container_name: nginx
+        image: hg_dnmpr_nginx:latest
+        build:
+            context: ../..
+            dockerfile: build/nginx/1.30/Dockerfile
+            args:
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                NGINX_VERSION: ${NGINX_VERSION}
+                OPENSSL_VERSION: ${OPENSSL_VERSION}
+                HMNM_VERSION: ${HEADERS_MORE_NGINX_MODULE_VERSION}
+                PCRE_VERSION: ${PCRE_VERSION}
+                NGX_BROTLI_VERSION: ${NGX_BROTLI_VERSION}
+                NGX_ZSTD_VERSION: ${NGX_ZSTD_VERSION}
+                NGINX_ENABLE_BROTLI: ${NGINX_ENABLE_BROTLI}
+                NGINX_ENABLE_ZSTD: ${NGINX_ENABLE_ZSTD}
+            network: host # 使用主机网络解决DNS问题
+        ports:
+            # 宿主侧由 docker-proxy 绑定 NGINX_*_HOST_PORT；容器内监听 80/443
+            # 依赖 Docker 默认能力集中的 NET_BIND_SERVICE，无需 privileged。
+            - '${NGINX_HTTP_HOST_PORT}:80'
+            - '${NGINX_HTTPS_HOST_PORT}:443'
+        volumes:
+            - ${GLOBAL_WEB_PATH}:/var/www/html/:rw
+            # 仅挂载虚拟主机到 conf.d；切勿挂载到 /etc/nginx/conf/，否则会覆盖镜像内的
+            # mime.types、proxy.conf、fastcgi_params 等，导致 nginx 启动失败。
+            - ${NGINX_VHOST_DIR}:/etc/nginx/conf.d/:rw
+            - ${NGINX_CONF_FILE}:/etc/nginx/conf/nginx.conf:ro
+            - ${NGINX_MIME_TYPES_FILE:-../../build/nginx/1.30/config/mime.types}:/etc/nginx/conf/mime.types:ro
+            # 运行时安全片段 + 证书（避免仅依赖镜像构建时 COPY 的过期证书）
+            - ../../build/nginx/1.30/config/snippets:/etc/nginx/conf/snippets:ro
+            - ${NGINX_VHOST_DIR}/certs:/etc/nginx/conf/ssl:ro
+            - ${NGINX_LOG_DIR}:/var/log/nginx/:rw
+        environment:
+            SET_CONTAINER_TIMEZONE: 'true'
+            CONTAINER_TIMEZONE: ${TZ}
+        healthcheck:
+            <<: *default-healthcheck
+            test: ['CMD', 'curl', '--fail', 'http://localhost/nginx_status'] # 或者针对Tengine使用 appropriate Tengine status endpoint
+            # test: ["CMD", "curl", "--fail", "--max-time", "5", "http://localhost/"]
+        deploy:
+            resources:
+                limits:
+                    cpus: ${NGINX_LIMITS_CPU:-0.5} # 默认0.5 CPU核心
+                    memory: ${NGINX_LIMITS_MEMORY:-256M} # 默认256MB内存
+                reservations:
+                    cpus: ${NGINX_RESERVATIONS_CPU:-0.25} # 默认预留0.25 CPU核心
+                    memory: ${NGINX_RESERVATIONS_MEMORY:-128M} # 默认预留128MB内存
+        depends_on:
+            php74_apache:
+                condition: service_healthy
+            # php82_apache:
+            #   condition: service_healthy
+            php84_apache:
+                condition: service_healthy
+        #     php85_apache:
+        #         condition: service_healthy
+        restart: unless-stopped # 或 always
+        # 仅前端网络：不可直连 backend 上的 DB（防公网入口横向移动）
+        # 仅前端网络（同 nginx）
+        networks:
+            - default
 
-  tengine-server:
-    <<: *default-common
-    container_name: tengine
-    image: hg_dnmpr_tengine:latest
-    build:
-      context: ../..
-      dockerfile: build/tengine/3.1/Dockerfile
-      args:
-        ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
-        CHANGE_SOURCE: ${CHANGE_SOURCE}
-        TENGINE_VERSION: ${TENGINE_VERSION}
-        HMNM_VERSION: ${HEADERS_MORE_NGINX_MODULE_VERSION}
-        HTTP_PROXY: ${HTTP_PROXY:-}
-        HTTPS_PROXY: ${HTTPS_PROXY:-}
-        NO_PROXY: ${NO_PROXY}
-      network: host # 使用主机网络解决DNS问题
-    ports:
-      - '${NGINX_HTTP_HOST_PORT}:80'
-      - '${NGINX_HTTPS_HOST_PORT}:443'
-    privileged: true
-    volumes:
-      - ${GLOBAL_WEB_PATH}:/var/www/html/:rw
-      - ${NGINX_VHOST_DIR}:/etc/nginx/conf.d/:rw
-      - ${TENGINE_CONF_FILE}:/etc/nginx/nginx.conf:ro
-      - ${NGINX_LOG_DIR}:/var/log/nginx/:rw
-    environment:
-      SET_CONTAINER_TIMEZONE: 'true'
-      CONTAINER_TIMEZONE: ${TZ}
-    healthcheck:
-      <<: *default-healthcheck
-      # test: ["CMD", "curl", "--fail", "http://localhost/nginx_status"] # Tengine也通常有类似的status模块
-      test: ['CMD', 'curl', '--fail', '--max-time', '5', 'http://localhost/']
-    deploy:
-      resources:
-        limits:
-          cpus: ${TENGINE_LIMITS_CPU:-0.5}
-          memory: ${TENGINE_LIMITS_MEMORY:-256M}
-        reservations:
-          cpus: ${TENGINE_RESERVATIONS_CPU:-0.25}
-          memory: ${TENGINE_RESERVATIONS_MEMORY:-128M}
-    restart: unless-stopped # 或 always
-    depends_on:
-      php74_apache:
-        condition: service_healthy
-      # php82_apache:
-      #   condition: service_healthy
-      php84_apache:
-        condition: service_healthy
-      # php85_apache:
-      #   condition: service_healthy
-    networks:
-      - default
+    tengine-server:
+        <<: *default-common
+        container_name: tengine
+        image: hg_dnmpr_tengine:latest
+        build:
+            context: ../..
+            dockerfile: build/tengine/3.1/Dockerfile
+            args:
+                ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
+                CHANGE_SOURCE: ${CHANGE_SOURCE}
+                TENGINE_VERSION: ${TENGINE_VERSION}
+                HMNM_VERSION: ${HEADERS_MORE_NGINX_MODULE_VERSION}
+                HTTP_PROXY: ${HTTP_PROXY:-}
+                HTTPS_PROXY: ${HTTPS_PROXY:-}
+                NO_PROXY: ${NO_PROXY}
+            network: host # 使用主机网络解决DNS问题
+        ports:
+            # 同 nginx：端口映射 + 默认 NET_BIND_SERVICE 即可，禁止 privileged。
+            - '${NGINX_HTTP_HOST_PORT}:80'
+            - '${NGINX_HTTPS_HOST_PORT}:443'
+        volumes:
+            - ${GLOBAL_WEB_PATH}:/var/www/html/:rw
+            - ${NGINX_VHOST_DIR}:/etc/nginx/conf.d/:rw
+            - ${TENGINE_CONF_FILE}:/etc/nginx/nginx.conf:ro
+            - ../../build/nginx/1.30/config/snippets:/etc/nginx/conf/snippets:ro
+            - ${NGINX_VHOST_DIR}/certs:/etc/nginx/conf/ssl:ro
+            - ${NGINX_LOG_DIR}:/var/log/nginx/:rw
+        environment:
+            SET_CONTAINER_TIMEZONE: 'true'
+            CONTAINER_TIMEZONE: ${TZ}
+        healthcheck:
+            <<: *default-healthcheck
+            # test: ["CMD", "curl", "--fail", "http://localhost/nginx_status"] # Tengine也通常有类似的status模块
+            test: ['CMD', 'curl', '--fail', '--max-time', '5', 'http://localhost/']
+        deploy:
+            resources:
+                limits:
+                    cpus: ${TENGINE_LIMITS_CPU:-0.5}
+                    memory: ${TENGINE_LIMITS_MEMORY:-256M}
+                reservations:
+                    cpus: ${TENGINE_RESERVATIONS_CPU:-0.25}
+                    memory: ${TENGINE_RESERVATIONS_MEMORY:-128M}
+        restart: unless-stopped # 或 always
+        depends_on:
+            php74_apache:
+                condition: service_healthy
+            # php82_apache:
+            #   condition: service_healthy
+            php84_apache:
+                condition: service_healthy
+            # php85_apache:
+            #   condition: service_healthy
+        networks:
+            - default

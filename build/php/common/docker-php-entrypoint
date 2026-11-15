@@ -1,6 +1,14 @@
 #!/bin/sh
 set -e
 
+# Align runtime dirs with php.ini session.save_path / upload_tmp_dir.
+# Named volumes and fresh tmpfs mounts may otherwise be root-only.
+for _php_runtime_dir in /tmp/php_sessions /tmp/php_upload; do
+	mkdir -p "${_php_runtime_dir}"
+	chmod 1777 "${_php_runtime_dir}" || true
+done
+unset _php_runtime_dir
+
 # first arg is `-f` or `--some-option`
 if [ "${1#-}" != "$1" ]; then
 	set -- apache2-foreground "$@"

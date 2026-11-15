@@ -181,7 +181,8 @@ flowchart TD
 
 ### Compose 与网络
 
-- 统一外部网络：`hg_dnmpr_network`（Docker 模式下由 `up.sh` 预建，名称不是 `hg_dnmpr_default`）。
+- 前端/共享外部网络：`hg_dnmpr_network`（Docker 模式下由 `up.sh` 预建，名称不是 `hg_dnmpr_default`）。
+- 后端外部网络：`hg_dnmpr_backend`（DB/缓存；`nginx`/`tengine` 不接入，降低公网入口横向移动面）。PHP 双网卡（前端+后端）。
 - 主栈由 `compose/main.yaml` 聚合 `stacks/*` 与当前环境 overlay；独立栈只加载自身 `stacks/*.yaml`，不与 `main.yaml` 混用。
 - 服务名映射、组合展开与 `-f` 文件选择集中在 `include/shell/service_catalog.sh`（单一数据源）。
 

@@ -83,6 +83,7 @@ FOLLOW="false"
 TAIL_LINES=""
 OPTIONS=""
 BUILD_IGNOREFILE=""
+MYSQL_BIND_HOST_CLI_SET="false"
 
 # 解析参数
 while [[ $# -gt 0 ]]; do
@@ -125,6 +126,22 @@ while [[ $# -gt 0 ]]; do
                 shift 2
             else
                 error "--tail 需要指定行数"
+            fi
+            ;;
+        --mysql-bind-host)
+            if [[ $# -gt 1 ]]; then
+                case "$2" in
+                    127.0.0.1|0.0.0.0)
+                        export MYSQL_BIND_HOST="$2"
+                        MYSQL_BIND_HOST_CLI_SET="true"
+                        shift 2
+                        ;;
+                    *)
+                        error "--mysql-bind-host 仅支持 127.0.0.1 或 0.0.0.0（收到: $2）"
+                        ;;
+                esac
+            else
+                error "--mysql-bind-host 需要指定地址（127.0.0.1 或 0.0.0.0）"
             fi
             ;;
         --env)
@@ -218,7 +235,19 @@ trap '_audit_on_exit $?' EXIT
 # 将所有项目内相对路径变量（清单见 project_paths.sh::HG_PROJECT_PATH_VARS）统一
 # 规范化为绝对路径，Docker 与 Podman（podman-compose 以 YAML 目录为基准）行为一致，
 # 因此此处不再单独处理 Podman 的 './' 前缀。
+# 保存命令行指定的 MYSQL_BIND_HOST，避免被 env/*.env 覆盖
+_mysql_bind_host_cli_value=""
+if [[ "${MYSQL_BIND_HOST_CLI_SET:-false}" == "true" ]]; then
+    _mysql_bind_host_cli_value="${MYSQL_BIND_HOST:-}"
+fi
+
 load_environment_variables
+
+# 恢复 --mysql-bind-host（优先级高于 env/mysql.env / .env）
+if [[ "${MYSQL_BIND_HOST_CLI_SET:-false}" == "true" && -n "${_mysql_bind_host_cli_value}" ]]; then
+    export MYSQL_BIND_HOST="${_mysql_bind_host_cli_value}"
+fi
+unset _mysql_bind_host_cli_value
 
 # 让 profile 中的 COMPOSE_PROFILE 同步到 Compose 标准变量 COMPOSE_PROFILES
 if [[ -n "${COMPOSE_PROFILE:-}" && -z "${COMPOSE_PROFILES:-}" ]]; then
@@ -286,6 +315,12 @@ export PHP_PROFILE_INI_FILE="$_php_profile_ini_file"
 info "PHP Profile 配置已生成: ${PHP_PROFILE_INI_FILE}（环境: ${PROJECT_ENVIRONMENT_SHORT:-dev}）"
 unset _php_profile_ini_file _php_memory_limit _php_max_execution_time _php_upload_max_filesize _php_post_max_size _php_max_input_vars _php_display_errors _php_error_reporting
 
+# MySQL 宿主机端口绑定：启动/重启涉及 MySQL 时交互选择（默认 127.0.0.1）
+# 须在生成 .env.runtime 之前完成，以便 compose 插值生效。
+if services_need_mysql_bind_prompt "$OPERATION" "${SERVICES[@]+"${SERVICES[@]}"}"; then
+    prompt_mysql_bind_host
+fi
+
 # ── 生成运行时覆盖 env 文件 ───────────────────────────────────────────────
 # compose 的 env_file 会原样加载 env/*.env；脚本层面的 .env/.env.local 覆盖不会自动进入容器。
 # 因此在最后追加 .env.runtime，把当前 shell 中合并后的最终配置值写入，确保 .env 是最高优先级。
@@ -326,7 +361,14 @@ if [[ ${#_runtime_existing_env_sources[@]} -gt 0 ]]; then
         fi
     done < <(grep -hE '^[A-Za-z_][A-Za-z0-9_]*=' "${_runtime_existing_env_sources[@]}" | cut -d= -f1 | sort -u)
     fi
-    for _runtime_key in COMPOSE_PROFILES PHP_PROFILE_INI_FILE ELK_BUILD_VERSION ELK_VERSION TINI_VERSION ELASTICSEARCH_CONF_DIR KIBANA_CONF_DIR LOGSTASH_CONF_DIR LOGSTASH_PIPELINE_CONF_DIR ELASTICSEARCH_YML_FILE; do
+    # 派生变量（源 env 中可能被注释，grep 扫不到）：必须显式写入，否则 compose 插值变空
+    for _runtime_key in \
+        COMPOSE_PROFILES PHP_PROFILE_INI_FILE \
+        ELK_BUILD_VERSION ELK_VERSION TINI_VERSION \
+        ELASTICSEARCH_CONF_DIR KIBANA_CONF_DIR LOGSTASH_CONF_DIR LOGSTASH_PIPELINE_CONF_DIR ELASTICSEARCH_YML_FILE \
+        REDIS_CONF_FILE MYSQL_CONF_FILE MYSQL_ENV_CONFIG_FILE \
+        MYSQL_VER PG_VERSION MONGO_VERSION REDIS_VERSION VALKEY_VERSION
+    do
         if [[ -v $_runtime_key ]]; then
             _runtime_val="${!_runtime_key}"
             _runtime_val="${_runtime_val//\'/\'\\\'\'}"

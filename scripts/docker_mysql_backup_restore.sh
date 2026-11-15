@@ -4,6 +4,99 @@
 set -e
 # 启用管道失败检测（管道中任何命令失败都会导致整个管道失败）
 set -o pipefail
+# 让 ERR trap 在函数/子 shell 中同样生效
+set -E
+
+# ── 异常中断提示 ────────────────────────────────────────────────────────────
+# set -e 下命令失败会直接退出且常常「没有任何输出」，让人误以为脚本自己中断。
+# 这里统一打印出错行与失败命令，便于定位（选项 4 / 恢复模式 2 的静默退出均属此类）。
+_on_script_error() {
+    local rc=$? line="${1:-?}" cmd="${2:-?}"
+    {
+        echo ""
+        echo "❌ 脚本在第 ${line} 行异常中断（退出码 ${rc}）"
+        echo "   失败命令: ${cmd}"
+        echo "   💡 若为 Access denied：请确认 .env 的 MYSQL_ROOT_PASSWORD 与容器内实际 root 密码一致"
+    } >&2
+    return 0
+}
+trap '_on_script_error "$LINENO" "$BASH_COMMAND"' ERR
+
+# ── 从 env 文件读取 MYSQL_ROOT_PASSWORD（去引号/首尾空白）──────────────────
+_env_file_password() {
+    local f="$1" line val
+    [ -r "$f" ] || return 1
+    line=$(grep -E '^[[:space:]]*(export[[:space:]]+)?MYSQL_ROOT_PASSWORD[[:space:]]*=' "$f" 2>/dev/null | tail -1 || true)
+    [ -n "$line" ] || return 1
+    val="${line#*=}"
+    val="${val#"${val%%[![:space:]]*}"}"
+    val="${val%"${val##*[![:space:]]}"}"
+    case "$val" in
+        \'*\') val="${val#\'}"; val="${val%\'}" ;;
+        \"*\") val="${val#\"}"; val="${val%\"}" ;;
+    esac
+    [ -n "$val" ] || return 1
+    printf '%s' "$val"
+}
+
+# ── 校验某个密码能否登录（不输出密码本身）──────────────────────────────────
+_mysql_auth_ok() {
+    local pw="$1"
+    [ -n "$pw" ] || return 1
+    docker exec "$MYSQL_CONTAINER_NAME" \
+        mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$pw" \
+        --connect-timeout=5 --silent --skip-column-names -e 'SELECT 1' >/dev/null 2>&1
+}
+
+# ── 解析可用凭据 ────────────────────────────────────────────────────────────
+# 背景：.env 轮换 MYSQL_ROOT_PASSWORD 后，容器重启不会改写已有数据目录里的 root 密码，
+#       脚本写死的旧密码会让后续所有 mysql 调用失败，而 2>/dev/null + set -e 会静默吞掉。
+resolve_mysql_credentials() {
+    local -a cands=()
+    local -a srcs=()
+    local pw src f i
+
+    _push_cand() {
+        local p="$1" s="$2" x
+        [ -n "$p" ] || return 0
+        for x in "${cands[@]}"; do
+            [ "$x" = "$p" ] && return 0
+        done
+        cands+=("$p")
+        srcs+=("$s")
+    }
+
+    _push_cand "${MYSQL_ROOT_PASSWORD:-}" "环境变量 MYSQL_ROOT_PASSWORD"
+    _push_cand "${MYSQL_PASSWORD:-}" "环境变量 MYSQL_PASSWORD"
+
+    for f in "$ENV_ROOT_DIR/.env" "$ENV_ROOT_DIR/.env.runtime"; do
+        pw=$(_env_file_password "$f" || true)
+        _push_cand "$pw" "$f"
+    done
+
+    if [ -d "$ENV_ROOT_DIR" ]; then
+        while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            pw=$(_env_file_password "$f" || true)
+            _push_cand "$pw" "$f"
+        done < <(ls -1t "$ENV_ROOT_DIR"/.env.bak.* 2>/dev/null | head -5 || true)
+    fi
+
+    _push_cand "$DEFAULT_MYSQL_PASSWORD" "脚本内置默认值"
+
+    for i in "${!cands[@]}"; do
+        if _mysql_auth_ok "${cands[$i]}"; then
+            MYSQL_PASSWORD="${cands[$i]}"
+            MYSQL_ROOT_PASSWORD="${cands[$i]}"
+            echo "🔐 数据库凭据校验通过（来源: ${srcs[$i]}）"
+            return 0
+        fi
+    done
+
+    echo "❌ 无法用任何候选密码登录 MySQL（已尝试 ${#cands[@]} 个来源）" >&2
+    echo "   请显式传入可用密码后重试： MYSQL_ROOT_PASSWORD='实际密码' $0" >&2
+    return 1
+}
 
 # 设置 MySQL 容器名称、用户名和密码
 MYSQL_CONTAINER_NAME='mysql'
@@ -12,10 +105,31 @@ MYSQL_HOST="127.0.0.1"
 MYSQL_PORT="3306"
 MYSQL_CHARSET="utf8mb4"
 MYSQL_USER='root'
-MYSQL_PASSWORD='15Vcw9CBPhOA6N'
+# 密码解析顺序见下方 resolve_mysql_credentials()：
+#   环境变量 MYSQL_ROOT_PASSWORD / MYSQL_PASSWORD
+#   > /data/hg_dnmpr/.env 与 .env.runtime
+#   > /data/hg_dnmpr/.env.bak.*（按时间倒序）
+#   > 脚本内置默认值
+MYSQL_PASSWORD="${MYSQL_PASSWORD:-}"
+MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-}"
+DEFAULT_MYSQL_PASSWORD='15Vcw9CBPhOA6N'
+ENV_ROOT_DIR="${ENV_ROOT_DIR:-/data/hg_dnmpr}"
 
 # 设置备份存放路径
 BACKUP_PATH='/data/db_backup/'
+
+# ── 恢复期 binlog 控制 ──────────────────────────────────────────────────────
+# 需求：数据恢复阶段不写 binlog，恢复完成后自动恢复记录。
+# 说明：MySQL 8.0 的 log_bin 是只读启动参数，sql_log_bin 是会话级变量，
+#       因此恢复流程里每条 mysql 连接都用 --init-command 关闭 sql_log_bin，
+#       连接断开即自动恢复记录（无需手工改回）；RESTORE_DISABLE_BINLOG=0 可关闭该行为。
+RESTORE_DISABLE_BINLOG="${RESTORE_DISABLE_BINLOG:-1}"
+MYSQL_INIT_NOBINLOG="SET SESSION sql_log_bin=0"
+MYSQL_INIT_BINLOG="SET SESSION sql_log_bin=1"
+MYSQL_RESTORE_INIT_ARGS=()
+if [ "$RESTORE_DISABLE_BINLOG" = "1" ]; then
+    MYSQL_RESTORE_INIT_ARGS=(--init-command="$MYSQL_INIT_NOBINLOG")
+fi
 
 # 检查并安装 pv 命令（用于显示进度）
 HAS_PV=false
@@ -130,9 +244,13 @@ fi
 _apply_sql_filters() {
     local rename_from="${1:-}"
     local rename_to="${2:-}"
-    local _init
-    # sql_log_bin=0 需 SUPER / BINLOG_ADMIN；本脚本以 root 连接，导入场景安全。
-    _init="SET SESSION sql_log_bin=0;"$'\n'"SET SESSION innodb_strict_mode=0;"$'\n'"SET SESSION sql_mode='NO_ENGINE_SUBSTITUTION';"$'\n'
+    local _init=""
+    # sql_log_bin=0 需 SUPER / SESSION_ADMIN；本脚本以 root 连接，导入场景安全。
+    # 数据恢复阶段默认关闭 binlog（避免导入过程按数据量 1:1 写 binlog）。
+    if [ "${RESTORE_DISABLE_BINLOG:-1}" = "1" ]; then
+        _init="SET SESSION sql_log_bin=0;"$'\n'
+    fi
+    _init="${_init}SET SESSION innodb_strict_mode=0;"$'\n'"SET SESSION sql_mode='NO_ENGINE_SUBSTITUTION';"$'\n'
 
     if [ -n "$rename_from" ] && [ -n "$rename_to" ] && [ "$rename_from" != "$rename_to" ]; then
         { printf '%s' "$_init"; cat; } | \
@@ -239,6 +357,71 @@ _mysql_disk_free_gb() {
     awk "BEGIN {printf \"%.1f\", ${avail_bytes} / 1024 / 1024 / 1024}"
 }
 
+# ── 二进制日志（binlog）状态控制 ───────────────────────────────────────────
+# 目标：数据恢复阶段不写 binlog；恢复完成后自动恢复记录。
+# 实现：MySQL 8.0 无法运行时全局关闭 log_bin，sql_log_bin 是会话级变量；
+#       恢复连接统一带 --init-command="SET SESSION sql_log_bin=0"，
+#       连接结束即自动恢复记录。此处负责「快照 + 开始/结束提示 + 增量核对」。
+_RESTORE_BINLOG_ACTIVE=0
+_RESTORE_BINLOG_START_BYTES=""
+
+_binlog_total_bytes() {
+    local bytes
+    bytes=$(docker exec "$MYSQL_CONTAINER_NAME" \
+        bash -lc 'du -sb /var/lib/mysql/binlog.* /var/lib/mysql/mysql-bin.* 2>/dev/null | awk "{s+=\$1} END {print s+0}"' \
+        2>/dev/null || true)
+    bytes=$(printf '%s' "${bytes:-0}" | tr -cd '0-9')
+    printf '%s' "${bytes:-0}"
+}
+
+_binlog_snapshot() {
+    _rdb_exec -e "SELECT CONCAT(@@GLOBAL.log_bin,'|',IFNULL(@@GLOBAL.log_bin_basename,''),'|',@@SESSION.sql_log_bin);" 2>/dev/null || true
+}
+
+_restore_binlog_begin() {
+    if [ "${_RESTORE_BINLOG_ACTIVE:-0}" = "1" ]; then
+        return 0
+    fi
+    _RESTORE_BINLOG_ACTIVE=1
+    _RESTORE_BINLOG_START_BYTES=$(_binlog_total_bytes)
+    local cfg
+    cfg=$(_binlog_snapshot)
+    cfg="${cfg%%|*}"
+    if [ "${RESTORE_DISABLE_BINLOG:-1}" = "1" ]; then
+        echo "🔇 数据恢复阶段：binlog 记录已暂停（sql_log_bin=0，仅作用于本次恢复连接）"
+        echo "   全局 log_bin=${cfg:-?}，恢复完成后 binlog 记录会自动恢复"
+    else
+        echo "ℹ️  RESTORE_DISABLE_BINLOG=0：本次恢复仍会写入 binlog"
+    fi
+}
+
+_restore_binlog_end() {
+    if [ "${_RESTORE_BINLOG_ACTIVE:-0}" != "1" ]; then
+        return 0
+    fi
+    _RESTORE_BINLOG_ACTIVE=0
+    local end_bytes delta state
+    end_bytes=$(_binlog_total_bytes)
+    state=$(_binlog_snapshot)
+    if [ "${RESTORE_DISABLE_BINLOG:-1}" = "1" ]; then
+        echo "🔊 数据恢复结束：binlog 记录已自动恢复（sql_log_bin=1）"
+    fi
+    if [ -n "${_RESTORE_BINLOG_START_BYTES:-}" ] && [ -n "$end_bytes" ]; then
+        delta=$(awk "BEGIN{printf \"%.2f\", (${end_bytes} - ${_RESTORE_BINLOG_START_BYTES})/1024/1024/1024}" 2>/dev/null || echo "?")
+        echo "   binlog 本次增量: ${delta} GB | 当前状态: ${state:-?}（末段为 sql_log_bin）"
+    fi
+    return 0
+}
+
+_restore_binlog_on_exit() {
+    if [ "${_RESTORE_BINLOG_ACTIVE:-0}" = "1" ]; then
+        echo ""
+        echo "🔊 恢复流程已结束/被中断：binlog 记录已自动恢复（sql_log_bin=1）"
+        _RESTORE_BINLOG_ACTIVE=0
+    fi
+}
+trap '_restore_binlog_on_exit' EXIT
+
 # ── InnoDB 写入自检：用于辅助诊断 Error 168 / 1030 / 权限问题 ─────────────
 _mysql_innodb_write_check() {
     local diag_db="_diag168_$$"
@@ -246,6 +429,7 @@ _mysql_innodb_write_check() {
     diag_sql="CREATE DATABASE IF NOT EXISTS \`${diag_db}\`; USE \`${diag_db}\`; CREATE TABLE IF NOT EXISTS t1(id INT PRIMARY KEY) ENGINE=InnoDB; DROP DATABASE IF EXISTS \`${diag_db}\`;"
     docker exec "$MYSQL_CONTAINER_NAME" \
         mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" \
+        "${MYSQL_RESTORE_INIT_ARGS[@]}" \
         -e "$diag_sql" 2>&1
 }
 
@@ -348,12 +532,12 @@ restore_file_with_progress() {
             gunzip < "$backup_file" 2>&1 | \
             _apply_sql_filters "$rename_from" "$db_name" | \
             docker exec -i $MYSQL_CONTAINER_NAME \
-            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD $db_name 2>"$error_file" || restore_status=$?
+            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" "${MYSQL_RESTORE_INIT_ARGS[@]}" $db_name 2>"$error_file" || restore_status=$?
         else
             gunzip < "$backup_file" 2>&1 | \
             _apply_sql_filters "$rename_from" "$db_name" | \
             docker exec -i $MYSQL_CONTAINER_NAME \
-            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>"$error_file" || restore_status=$?
+            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" "${MYSQL_RESTORE_INIT_ARGS[@]}" 2>"$error_file" || restore_status=$?
         fi
 
         # 检查是否有真正的错误（排除警告信息）
@@ -424,13 +608,13 @@ restore_file_with_progress() {
             pv -p -t -e -r -b -s "$file_size" "$backup_file" 2>&2 | gunzip 2>/dev/null | \
             _apply_sql_filters "$rename_from" "$db_name" | \
             docker exec -i $MYSQL_CONTAINER_NAME \
-            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD $db_name 2>"$error_file" || restore_status=$?
+            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" "${MYSQL_RESTORE_INIT_ARGS[@]}" $db_name 2>"$error_file" || restore_status=$?
         else
             # pv 的进度输出到 stderr（终端），数据输出到 stdout
             pv -p -t -e -r -b -s "$file_size" "$backup_file" 2>&2 | gunzip 2>/dev/null | \
             _apply_sql_filters "$rename_from" "$db_name" | \
             docker exec -i $MYSQL_CONTAINER_NAME \
-            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>"$error_file" || restore_status=$?
+            mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" "${MYSQL_RESTORE_INIT_ARGS[@]}" 2>"$error_file" || restore_status=$?
         fi
 
         # 检查是否有真正的错误（排除警告信息）
@@ -494,7 +678,7 @@ restore_file_with_progress() {
                 dd if="$backup_file" bs=1M status=progress 2>"$progress_file" | gunzip 2>/dev/null | \
                 _apply_sql_filters "$rename_from" "$db_name" | \
                 docker exec -i $MYSQL_CONTAINER_NAME \
-                mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD $db_name 2>"$error_file"
+                mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" "${MYSQL_RESTORE_INIT_ARGS[@]}" $db_name 2>"$error_file"
             ) &
             local restore_pid=$!
         else
@@ -502,7 +686,7 @@ restore_file_with_progress() {
                 dd if="$backup_file" bs=1M status=progress 2>"$progress_file" | gunzip 2>/dev/null | \
                 _apply_sql_filters "$rename_from" "$db_name" | \
                 docker exec -i $MYSQL_CONTAINER_NAME \
-                mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>"$error_file"
+                mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" "${MYSQL_RESTORE_INIT_ARGS[@]}" 2>"$error_file"
             ) &
             local restore_pid=$!
         fi
@@ -618,6 +802,9 @@ if ! docker ps | grep -q "$MYSQL_CONTAINER_NAME"; then
     exit 1
 fi
 
+# 解析并校验数据库凭据（旧密码会让后续 mysql 调用失败，曾因 set -e 静默退出）
+resolve_mysql_credentials || exit 1
+
 # 命令行参数：仅当单独传入 "1"/"2"/"7" 时跳过菜单直接执行对应操作；
 # 无参数、非法参数、多参数组合一律忽略并走原交互菜单。
 OPERATION=""
@@ -655,7 +842,7 @@ backup_single_db() {
 
    echo "正在备份数据库: $DB_NAME ..."
    docker exec $MYSQL_CONTAINER_NAME \
-   mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD \
+   mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" \
    --default-character-set=$MYSQL_CHARSET \
    --single-transaction \
    --set-gtid-purged=OFF \
@@ -681,7 +868,7 @@ backup_all_dbs() {
     echo "正在获取数据库列表..."
     # 获取所有非系统数据库列表
     DBS_RAW=$(docker exec $MYSQL_CONTAINER_NAME \
-    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD -e "SHOW DATABASES;" 2>/dev/null | grep -Ev "(Database|sys|information_schema|performance_schema|mysql)")
+    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" -e "SHOW DATABASES;" 2>/dev/null | grep -Ev "(Database|sys|information_schema|performance_schema|mysql)" || true)
 
     if [ -z "$DBS_RAW" ]; then
         echo "❌ 未找到任何数据库！"
@@ -708,7 +895,7 @@ backup_all_dbs() {
 
         echo "正在备份数据库: $db ..."
         docker exec $MYSQL_CONTAINER_NAME \
-        mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD \
+        mysqldump -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" \
         --default-character-set=utf8mb4 \
         --single-transaction \
         --set-gtid-purged=OFF \
@@ -736,14 +923,16 @@ extract_db_name_from_file() {
     local backup_file="$1"
     local detected_db=""
 
+    # 注意：set -e + pipefail 下，zcat|head 会因 SIGPIPE(141)、grep 无匹配(1) 失败，
+    #       旧写法会让脚本在「检测库名」处静默中断，因此统一加 || true。
     # 方法1：含 USE `db`; 的备份（mysqldump --databases）
     detected_db=$(zcat "$backup_file" 2>/dev/null | head -50 \
-        | grep -m1 "^USE " | sed 's/^USE //;s/;//' | tr -d '`' | tr -d ' \r\n')
+        | grep -m1 "^USE " | sed 's/^USE //;s/;//' | tr -d '`' | tr -d ' \r\n' || true)
 
     # 方法2：从 mysqldump 头部注释 "-- Host: x.x.x.x    Database: db_name" 提取
     if [ -z "$detected_db" ]; then
         detected_db=$(zcat "$backup_file" 2>/dev/null | head -5 \
-            | grep "^-- Host:" | sed 's/.*Database:[[:space:]]*//' | tr -d ' \r\n')
+            | grep "^-- Host:" | sed 's/.*Database:[[:space:]]*//' | tr -d ' \r\n' || true)
     fi
 
     echo "$detected_db"
@@ -785,6 +974,7 @@ restore_with_auto_db() {
     echo "ℹ️  确保目标数据库: \`$target_db\`（默认字符集 utf8mb4，排序规则 utf8mb4_unicode_ci）"
     docker exec "$MYSQL_CONTAINER_NAME" \
         mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" \
+        "${MYSQL_RESTORE_INIT_ARGS[@]}" \
         -e "CREATE DATABASE IF NOT EXISTS \`${target_db}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" \
         2>/dev/null || true
 
@@ -905,12 +1095,21 @@ restore_single_db() {
 
     # 若选择清空重建，且目标库已存在，则直接删除后重建恢复
     if [ "$RESTORE_MODE" = "2" ]; then
-        local db_exists
-        db_exists=$(_rdb_exec -e "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='${TARGET_DB}';")
+        local db_exists=""
+        # 注意：查询失败曾被 set -e + 2>/dev/null 静默吞掉（选完模式就回到 shell 的根因），
+        #       这里显式捕获失败并输出可读错误，绝不静默退出。
+        _RDB_NOBINLOG=1
+        if ! db_exists=$(_rdb_exec -e "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='${TARGET_DB}';"); then
+            _RDB_NOBINLOG=0
+            echo "❌ 无法确认目标数据库 \`$TARGET_DB\` 是否存在（数据库查询失败），已中止且未做任何删除"
+            return 1
+        fi
+        db_exists=$(printf '%s' "${db_exists:-0}" | tr -cd '0-9')
         db_exists=${db_exists:-0}
         if [ "$db_exists" -gt 0 ] 2>/dev/null; then
-            echo "🗑️  正在清空目标数据库: \`$TARGET_DB\`"
+            echo "🗑️  正在清空目标数据库: \`$TARGET_DB\`（本次删除不写入 binlog）"
             if ! _rdb_exec -e "DROP DATABASE IF EXISTS \`${TARGET_DB}\`;"; then
+                _RDB_NOBINLOG=0
                 echo "❌ 删除目标数据库失败，已中止恢复"
                 return 1
             fi
@@ -918,6 +1117,7 @@ restore_single_db() {
         else
             echo "ℹ️  目标数据库当前不存在，按重建导入流程继续"
         fi
+        _RDB_NOBINLOG=0
     fi
 
     # ── 4. 确保目标库存在并执行恢复 ─────────────────────────────────────
@@ -927,7 +1127,11 @@ restore_single_db() {
     echo "文件: $(basename "$RESTORE_FILE")"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-    if restore_with_auto_db "$RESTORE_FILE" "$TARGET_DB" "$RENAME_FROM"; then
+    _restore_binlog_begin
+    local restore_rc=0
+    restore_with_auto_db "$RESTORE_FILE" "$TARGET_DB" "$RENAME_FROM" || restore_rc=$?
+    _restore_binlog_end
+    if [ "$restore_rc" -eq 0 ]; then
         echo "✅ 数据库 \`$TARGET_DB\` 恢复完成"
         _maybe_delete_restore_source "$RESTORE_FILE"
     else
@@ -938,11 +1142,28 @@ restore_single_db() {
 
 # ── 辅助函数：在容器内静默执行 SQL 并返回结果（自动屏蔽密码警告）──────────
 _rdb_exec() {
-    docker exec "$MYSQL_CONTAINER_NAME" \
+    local -a init_args=()
+    # 恢复流程中的管理语句（DROP/CREATE/SELECT 校验）同样不写 binlog
+    if [ "${_RDB_NOBINLOG:-0}" = "1" ] && [ "${RESTORE_DISABLE_BINLOG:-1}" = "1" ]; then
+        init_args=(--init-command="$MYSQL_INIT_NOBINLOG")
+    fi
+    local err_file rc=0 out
+    err_file=$(mktemp "/tmp/_rdb_exec.XXXXXX" 2>/dev/null || echo "/tmp/_rdb_exec.$$")
+    out=$(docker exec "$MYSQL_CONTAINER_NAME" \
         mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" \
         -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" \
-        --silent --skip-column-names \
-        "$@" 2>/dev/null
+        --connect-timeout=10 --silent --skip-column-names \
+        "${init_args[@]}" \
+        "$@" 2>"$err_file") || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        # 只回显真正的错误（过滤密码告警），避免再次静默失败
+        grep -v -e '\[Warning\]' -e 'Using a password' "$err_file" 2>/dev/null | sed 's/^/   /' >&2 || true
+    fi
+    rm -f "$err_file" 2>/dev/null || true
+    if [ -n "${out:-}" ]; then
+        printf '%s\n' "$out"
+    fi
+    return "$rc"
 }
 
 # ── 数据库更名 ─────────────────────────────────────────────────────────────
@@ -1444,6 +1665,7 @@ restore_all_dbs() {
        local success_count=0
        local failed_count=0
 
+       _restore_binlog_begin
        set +e
        # 批量导入：每个库跳过即时 PURGE，全部完成后统一清理一次
        SKIP_POST_RESTORE_CLEANUP=1
@@ -1473,6 +1695,7 @@ restore_all_dbs() {
 
        unset SKIP_POST_RESTORE_CLEANUP
        set -e
+       _restore_binlog_end
 
        if [ "$success_count" -gt 0 ]; then
            _post_restore_space_cleanup || true
@@ -1494,7 +1717,11 @@ restore_all_dbs() {
    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
    echo "正在恢复数据库"
    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-   if restore_with_auto_db "$BACKUP_FILE_PATH"; then
+   _restore_binlog_begin
+   local all_rc=0
+   restore_with_auto_db "$BACKUP_FILE_PATH" || all_rc=$?
+   _restore_binlog_end
+   if [ "$all_rc" -eq 0 ]; then
        echo "✅ 所有数据库从文件 $BACKUP_FILE_PATH 恢复完成。"
    else
        echo "❌ 数据库恢复失败！"
@@ -1510,7 +1737,7 @@ delete_all_dbs() {
     # 获取所有非系统数据库列表
     echo "正在获取数据库列表..."
     DBS_RAW=$(docker exec $MYSQL_CONTAINER_NAME \
-    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD -e "SHOW DATABASES;" 2>/dev/null | grep -Ev "(Database|sys|information_schema|performance_schema|mysql)")
+    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" -e "SHOW DATABASES;" 2>/dev/null | grep -Ev "(Database|sys|information_schema|performance_schema|mysql)" || true)
 
     if [ -z "$DBS_RAW" ]; then
         echo "ℹ️  未找到任何非系统数据库，无需删除。"
@@ -1555,8 +1782,9 @@ delete_all_dbs() {
     # 删除每个数据库
     for db in "${DBS_ARRAY[@]}"; do
         echo "正在删除数据库: $db ..."
+        # DROP 大库会产生等量 binlog，删除阶段同样关闭（仅该连接生效）
         docker exec $MYSQL_CONTAINER_NAME \
-        mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD -e "DROP DATABASE IF EXISTS \`$db\`;" 2>/dev/null
+        mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" "${MYSQL_RESTORE_INIT_ARGS[@]}" -e "DROP DATABASE IF EXISTS \`$db\`;" 2>/dev/null
 
         if [ $? -eq 0 ]; then
             echo "✅ 数据库 $db 删除成功"
@@ -1581,13 +1809,13 @@ delete_all_dbs() {
     echo ""
     echo "当前剩余数据库："
     docker exec $MYSQL_CONTAINER_NAME \
-    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD -e "SHOW DATABASES;" 2>/dev/null | grep -v "Database"
+    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" -e "SHOW DATABASES;" 2>/dev/null | grep -v "Database"
 
     # 优化MySQL表空间
     echo ""
     echo "正在优化MySQL表空间..."
     docker exec $MYSQL_CONTAINER_NAME \
-    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD -e "FLUSH TABLES;" 2>/dev/null
+    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" -e "FLUSH TABLES;" 2>/dev/null
 
     echo "✅ 数据库空间清理完成！"
 }
@@ -1631,16 +1859,18 @@ complete_cleanup_restore() {
             if [ -n "$LATEST_BACKUP" ]; then
                 echo "找到最新备份文件: $LATEST_BACKUP"
                 echo "正在恢复所有数据库..."
+                _restore_binlog_begin
                 if gunzip < "$LATEST_BACKUP" | \
                     _apply_sql_filters | \
                     docker exec -i $MYSQL_CONTAINER_NAME \
-                    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>/dev/null; then
+                    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" "${MYSQL_RESTORE_INIT_ARGS[@]}" 2>/dev/null; then
                     echo "✅ 所有数据库恢复完成！"
                     _post_restore_space_cleanup || true
                     _maybe_delete_restore_source "$LATEST_BACKUP"
                 else
                     echo "❌ 数据库恢复失败！"
                 fi
+                _restore_binlog_end
             else
                 echo "❌ 未找到备份文件！"
             fi
@@ -1649,16 +1879,18 @@ complete_cleanup_restore() {
             read -p "输入备份文件路径: " BACKUP_FILE_PATH
             if [ -f "$BACKUP_FILE_PATH" ]; then
                 echo "正在恢复所有数据库..."
+                _restore_binlog_begin
                 if gunzip < "$BACKUP_FILE_PATH" | \
                     _apply_sql_filters | \
                     docker exec -i $MYSQL_CONTAINER_NAME \
-                    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p$MYSQL_PASSWORD 2>/dev/null; then
+                    mysql -h$MYSQL_HOST -P$MYSQL_PORT -u$MYSQL_USER -p"$MYSQL_PASSWORD" "${MYSQL_RESTORE_INIT_ARGS[@]}" 2>/dev/null; then
                     echo "✅ 所有数据库恢复完成！"
                     _post_restore_space_cleanup || true
                     _maybe_delete_restore_source "$BACKUP_FILE_PATH"
                 else
                     echo "❌ 数据库恢复失败！"
                 fi
+                _restore_binlog_end
             else
                 echo "❌ 备份文件不存在：$BACKUP_FILE_PATH"
             fi

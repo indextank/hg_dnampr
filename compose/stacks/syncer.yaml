@@ -114,10 +114,15 @@ services:
                     memory: ${SYNCER_LIMITS_MEMORY:-512M}
                 reservations:
                     memory: ${SYNCER_RESERVATIONS_MEMORY:-128M}
+        # 可能访问 mysql（backend）与 elasticsearch/rabbitmq（前端网）
         networks:
             - lnamp_network
+            - backend
 
 networks:
     lnamp_network:
         external: true
         name: hg_dnmpr_network
+    backend:
+        external: true
+        name: hg_dnmpr_backend

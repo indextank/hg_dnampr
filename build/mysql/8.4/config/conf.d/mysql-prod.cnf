@@ -16,7 +16,7 @@ innodb_numa_interleave = 0
 
 # SSL/TLS 配置 - 生产环境
 # 决策（已确认）：生产环境不要求强制 TLS —— 本部署为 Docker 内网容器间通信，
-# 且宿主机端口仅监听 127.0.0.1（env/mysql.env: MYSQL_BIND_HOST），流量不出公网。
+# 宿主机端口绑定见 env/mysql.env: MYSQL_BIND_HOST（默认 127.0.0.1；up.sh 可交互选 0.0.0.0）。
 # 若未来对外暴露 MySQL 端口，请先配置 ssl_cert/ssl_key/ssl_ca 再将此项改为 ON。
 require_secure_transport = OFF
 

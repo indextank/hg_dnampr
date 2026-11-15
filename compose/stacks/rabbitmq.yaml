@@ -137,13 +137,18 @@ services:
                     memory: ${CANAL_LIMITS_MEMORY:-2G}
                 reservations:
                     memory: ${CANAL_RESERVATIONS_MEMORY:-512M}
+        # canal 需访问 backend 上的 mysql；同时留在前端网以连 rabbitmq
         networks:
             - lnamp_network
+            - backend
 
 networks:
     lnamp_network:
         external: true
         name: hg_dnmpr_network
+    backend:
+        external: true
+        name: hg_dnmpr_backend
 
 volumes:
     rabbitmq_data:

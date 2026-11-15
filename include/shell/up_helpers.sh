@@ -114,6 +114,77 @@ format_services_inline() {
     echo "$out"
 }
 
+# 本次 up/start/restart 是否可能涉及 MySQL 宿主机端口绑定
+# 参数: 操作名 + 服务名列表（可为空表示「按已构建镜像启动主栈」）
+# 返回: 0=需要选择绑定地址；1=不需要
+services_need_mysql_bind_prompt() {
+    local op="${1:-}"
+    shift || true
+    case "${op}" in
+        up|start|restart) ;;
+        *) return 1 ;;
+    esac
+    if [[ "$#" -eq 0 ]]; then
+        return 0
+    fi
+    local svc
+    for svc in "$@"; do
+        case "${svc}" in
+            mysql|mysql_backup|all) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# 交互选择 MySQL 宿主机端口绑定（MYSQL_BIND_HOST）
+# - 默认 127.0.0.1（回车）
+# - 可选 0.0.0.0
+# - 非交互 / dry-run / 已用 --mysql-bind-host 指定时跳过提问
+# 副作用: export MYSQL_BIND_HOST
+prompt_mysql_bind_host() {
+    local current="${MYSQL_BIND_HOST:-127.0.0.1}"
+    local choice=""
+
+    if [[ "${MYSQL_BIND_HOST_CLI_SET:-false}" == "true" ]]; then
+        info "MySQL 宿主机绑定使用命令行指定: ${MYSQL_BIND_HOST}"
+        export MYSQL_BIND_HOST
+        return 0
+    fi
+
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+        export MYSQL_BIND_HOST="${current}"
+        info "[DRY-RUN] MySQL 宿主机绑定将使用: ${MYSQL_BIND_HOST}（交互选择已跳过）"
+        return 0
+    fi
+
+    if [[ ! -t 0 ]]; then
+        export MYSQL_BIND_HOST="${current}"
+        info "非交互环境：MySQL 宿主机绑定保持 ${MYSQL_BIND_HOST}"
+        return 0
+    fi
+
+    echo ""
+    echo -e "${CYAN}MySQL 宿主机端口绑定地址${NC}"
+    echo -e "  ${GREEN}1${NC}) 127.0.0.1  — 仅本机访问（默认，更安全）"
+    echo -e "  ${YELLOW}2${NC}) 0.0.0.0    — 监听所有网卡（需防火墙限制来源）"
+    echo -e "  当前/配置值: ${current}"
+    echo ""
+    read -r -p "请选择 [1/2，回车=1]: " choice
+    case "${choice}" in
+        ""|1|127.0.0.1)
+            export MYSQL_BIND_HOST="127.0.0.1"
+            ;;
+        2|0.0.0.0)
+            export MYSQL_BIND_HOST="0.0.0.0"
+            ;;
+        *)
+            warn "无效选择「${choice}」，回退默认 127.0.0.1"
+            export MYSQL_BIND_HOST="127.0.0.1"
+            ;;
+    esac
+    success "MySQL 宿主机绑定已设为: ${MYSQL_BIND_HOST}"
+}
+
 # 显示使用帮助
 show_help() {
     cat << 'ENDOFHELP'
@@ -158,6 +229,10 @@ show_help() {
     -d, --detach       后台运行
     -f, --follow       跟踪日志输出
     --tail N           显示最后 N 行日志
+    --mysql-bind-host ADDR
+                       MySQL 宿主机端口绑定（127.0.0.1 或 0.0.0.0）
+                       指定后跳过交互；未指定且将启动/重启 MySQL 时会提问
+                       默认（回车）: 127.0.0.1
     --dry-run          空运行模式，输出操作计划而不实际执行
                        包括：操作类型、环境、服务列表（含依赖解析）、
                        Compose 文件路径和将要执行的命令清单
@@ -173,6 +248,8 @@ show_help() {
     ./up.sh php84 logs -f                            # 跟踪 PHP 8.4 日志
     ./up.sh php84 logs --tail 100                    # 显示 PHP 8.4 最后 100 行日志
     ./up.sh php84 exec                               # 进入 PHP 8.4 容器
+    ./up.sh mysql                                    # 启动 MySQL（交互选择绑定 127.0.0.1/0.0.0.0）
+    ./up.sh mysql --mysql-bind-host 0.0.0.0 -d       # 非交互绑定全网卡并后台启动
     ./up.sh up -d                                    # 后台启动：主栈（已构建镜像）+ 有镜像的 ELK/RabbitMQ/Syncer 等
     ./up.sh status                                   # 列出所有项目容器的名称、IP 及状态
     ./up.sh mysql status                             # 仅列出 MySQL 相关容器的名称、IP 及状态

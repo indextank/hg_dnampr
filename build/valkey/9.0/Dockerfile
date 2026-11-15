@@ -19,7 +19,7 @@ RUN set -eux; \
 	addgroup -S -g 1000 valkey; \
 	adduser -S -G valkey -u 999 valkey
 
-# runtime dependencies
+# runtime dependencies（setpriv 必须始终安装：entrypoint 降权依赖它，与 CHANGE_SOURCE 无关）
 RUN set -eux; \
     mkdir -p ${TMP_DIR}; \
     \
@@ -30,10 +30,11 @@ RUN set -eux; \
             sed -i "s/${ALPINE_REPOSITORIES}/dl-cdn.alpinelinux.org/g" /etc/apk/repositories; \
             apk update; \
         fi; \
-        # grab su-exec for easy step-down from root
         apk add --no-cache tzdata setpriv; \
         cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime; \
         echo "Asia/Shanghai" > /etc/timezone; \
+    else \
+        apk add --no-cache setpriv; \
     fi;
 
 ENV TMP_DIR=/tmp/extensions
@@ -145,7 +146,11 @@ VOLUME /data
 WORKDIR /data
 
 COPY ./build/valkey/9.0/docker-entrypoint.sh /usr/local/bin/
-ENTRYPOINT ["docker-entrypoint.sh"]
+# 必须用绝对路径：若容器 PATH 不含 /usr/local/bin（宿主 env 注入等），
+# 相对名 docker-entrypoint.sh 会报：executable file not found in $PATH
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh \
+	&& ln -sf /usr/local/bin/docker-entrypoint.sh /docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 EXPOSE 6379
 CMD ["valkey-server"]

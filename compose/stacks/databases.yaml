@@ -33,10 +33,10 @@ x-common-variables: &default-common
         - NET_RAW
     # 默认日志轮转，防止 json 日志无限增长（overlays 中的 logging 会覆盖此处）
     logging:
-        driver: "json-file"
+        driver: 'json-file'
         options:
-            max-size: "50m"
-            max-file: "3"
+            max-size: '50m'
+            max-file: '3'
 
 services:
     ################  valkey - redis衍生版 ########################
@@ -57,24 +57,32 @@ services:
                 NO_PROXY: ${NO_PROXY}
             network: host # 使用主机网络解决DNS问题
         ports:
-            - "${REDIS_BIND_HOST:-127.0.0.1}:${REDIS_HOST_PORT}:6379"
+            - '${REDIS_BIND_HOST:-127.0.0.1}:${REDIS_HOST_PORT}:6379'
         environment:
-            SET_CONTAINER_TIMEZONE: "true"
+            SET_CONTAINER_TIMEZONE: 'true'
             CONTAINER_TIMEZONE: ${TZ}
+            # 覆盖可能被宿主注入的残缺 PATH，保证 entrypoint/valkey-server 可解析
+            PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
         volumes:
-            - ${REDIS_CONF_FILE}:/etc/redis.conf:ro
-            - ${REDIS_LOG_DIR}:/var/log/redis/:rw
+            - ${REDIS_CONF_FILE:-../../build/redis/8.10/redis.conf}:/etc/redis.conf:ro
+            - ${REDIS_LOG_DIR:-../../logs/redis}:/var/log/redis/:rw
             - ${VALKEY_DATA_DIR:-valkey_data}:/data:rw
-        # 保留镜像 ENTRYPOINT（docker-entrypoint.sh 负责 setpriv 降权为 valkey 用户）；
+        # 强制绝对路径 ENTRYPOINT：旧镜像若用相对名 docker-entrypoint.sh，在 PATH 无
+        # /usr/local/bin 时会报 executable file not found in $PATH。
         # 口令来自 .env 的 REDIS_PASSWORD（经 env_file 注入），在容器内展开，不写入配置文件；
         # 未设置时仅本容器拒绝启动（fail-closed），不影响其它服务的 compose 解析。
+        entrypoint: ['/usr/local/bin/docker-entrypoint.sh']
         command:
             - sh
             - -c
             - ': "$${REDIS_PASSWORD:?REDIS_PASSWORD 未设置，请在 .env 中配置}"; exec /usr/local/bin/docker-entrypoint.sh valkey-server /etc/redis.conf --requirepass "$$REDIS_PASSWORD"'
         healthcheck:
             <<: *default-healthcheck
-            test: ["CMD-SHELL", "valkey-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+            test:
+                [
+                    'CMD-SHELL',
+                    'valkey-cli --no-auth-warning -a "$$REDIS_PASSWORD" ping | grep -q PONG',
+                ]
         deploy:
             resources:
                 limits:
@@ -84,7 +92,7 @@ services:
                     memory: ${REDIS_RESERVATIONS_MEMORY}
         restart: unless-stopped # 或 always
         networks:
-            default:
+            backend:
                 aliases:
                     - redis # 添加redis别名，支持使用redis或valkey作为服务名
                     - valkey
@@ -109,18 +117,20 @@ services:
                 NO_PROXY: ${NO_PROXY}
             network: host # 使用主机网络解决DNS问题
         ports:
-            - "${REDIS_BIND_HOST:-127.0.0.1}:${REDIS_HOST_PORT:-6379}:6379"
+            - '${REDIS_BIND_HOST:-127.0.0.1}:${REDIS_HOST_PORT:-6379}:6379'
         environment:
-            SET_CONTAINER_TIMEZONE: "true"
+            SET_CONTAINER_TIMEZONE: 'true'
             CONTAINER_TIMEZONE: ${TZ:-Asia/Shanghai}
+            PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
         volumes:
             - ${REDIS_CONF_FILE:-../../build/redis/8.10/redis.conf}:/etc/redis.conf:ro
             - ${REDIS_LOG_DIR:-../../logs/redis}:/var/log/redis/:rw
             - ${REDIS_DATA_DIR:-redis_data}:/data:rw
-        # 保留镜像 ENTRYPOINT（docker-entrypoint.sh 负责 setpriv 降权为 redis 用户）；
+        # 强制绝对路径 ENTRYPOINT（与 valkey 同因，避免 PATH 异常时相对名找不到）。
         # 口令来自 .env 的 REDIS_PASSWORD（经 env_file 注入），在容器内展开，不写入配置文件；
         # 未设置时仅本容器拒绝启动（fail-closed）。
         # 应急回退为 root 运行：env/redis.env 设置 SKIP_DROP_PRIVS=1（不建议长期使用）。
+        entrypoint: ['/usr/local/bin/docker-entrypoint.sh']
         command:
             - sh
             - -c
@@ -135,9 +145,9 @@ services:
         healthcheck:
             <<: *default-healthcheck
             # REDISCLI_AUTH 避免口令出现在进程参数中
-            test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+            test: ['CMD-SHELL', 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
         networks:
-            - default
+            - backend
         # sysctls:
         #   - net.core.somaxconn=1024
 
@@ -183,7 +193,7 @@ services:
                 NO_PROXY: ${NO_PROXY}
             network: host # 使用主机网络解决DNS问题
         healthcheck:
-            test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+            test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
             interval: 30s
             timeout: 10s
             retries: 5
@@ -213,9 +223,9 @@ services:
             - ${MYSQL_LOG_DIR}:/var/log/mysql:rw
             - ${BUILD_ROOT:-../../build}/mysql/${MYSQL_BUILD_VERSION:-8.4}/init-mysql-user.sh:/docker-entrypoint-initdb.d/init-mysql-user.sh:ro
         ports:
-            - "${MYSQL_BIND_HOST:-127.0.0.1}:${MYSQL_HOST_PORT:-3306}:3306" # 使用不同的端口，默认3306
+            - '${MYSQL_BIND_HOST:-127.0.0.1}:${MYSQL_HOST_PORT:-3306}:3306' # 默认本机；up.sh 可交互选 0.0.0.0
         networks:
-            default:
+            backend:
                 aliases:
                     - mysql # 添加mysql别名，支持使用mysql作为服务名
         deploy:
@@ -249,17 +259,17 @@ services:
         volumes:
             - ${MYSQL_BACKUP_DIR:-/data/mysql_backup}:/backup:rw
             - ../../include/shell/backup-mysql.sh:/usr/local/bin/backup-mysql.sh:ro
-        command: ["bash", "/usr/local/bin/backup-mysql.sh"]
+        command: ['bash', '/usr/local/bin/backup-mysql.sh']
         restart: unless-stopped
         networks:
-            - default
+            - backend
         deploy:
             resources:
                 limits:
-                    cpus: "0.5"
-                    memory: "512M"
+                    cpus: '0.5'
+                    memory: '512M'
                 reservations:
-                    memory: "128M"
+                    memory: '128M'
 
     ################  MongoDB 备份服务 ########################
     mongo-backup:
@@ -277,17 +287,17 @@ services:
         volumes:
             - ${MONGO_BACKUP_DIR:-/data/mongo_backup}:/backup:rw
             - ../../include/shell/backup-mongo.sh:/usr/local/bin/backup-mongo.sh:ro
-        command: ["bash", "/usr/local/bin/backup-mongo.sh"]
+        command: ['bash', '/usr/local/bin/backup-mongo.sh']
         restart: unless-stopped
         networks:
-            - default
+            - backend
         deploy:
             resources:
                 limits:
-                    cpus: "0.5"
-                    memory: "512M"
+                    cpus: '0.5'
+                    memory: '512M'
                 reservations:
-                    memory: "128M"
+                    memory: '128M'
 
     ################   mongo ########################
     mongo-server:
@@ -309,7 +319,7 @@ services:
             MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
             MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
         ports:
-            - "${MONGO_HOST_PORT}:27017"
+            - '${MONGO_HOST_PORT}:27017'
         volumes:
             - ${MONGO_DATA_PATH:-${DATA_PATH_HOST}/${MONGO_DATA_SUBDIR}}:/data/db:rw # 留空 MONGO_DATA_PATH → 自动拼装 ${DATA_PATH_HOST}/${MONGO_DATA_SUBDIR}
         deploy:
@@ -320,7 +330,7 @@ services:
                 reservations:
                     memory: ${MONGO_RESERVATIONS_MEMORY}
         networks:
-            - default
+            - backend
         command: --auth
 
     #################   postgres  ########################
@@ -341,7 +351,7 @@ services:
                 NO_PROXY: ${NO_PROXY}
             network: host # 使用主机网络解决DNS问题
         ports:
-            - "${PG_PORT}:5432"
+            - '${PG_PORT}:5432'
         environment:
             # PG_USER: ${PG_USER}
             # PG_PASSWORD: ${PG_PASSWORD}
@@ -358,7 +368,7 @@ services:
                 reservations:
                     memory: ${PG_RESERVATIONS_MEMORY}
         networks:
-            - default
+            - backend
         restart: unless-stopped
 
     ################  PostgreSQL 备份服务 ########################
@@ -377,17 +387,17 @@ services:
         volumes:
             - ${PG_BACKUP_DIR:-/data/pg_backup}:/backup:rw
             - ../../include/shell/backup-pg.sh:/usr/local/bin/backup-pg.sh:ro
-        command: ["bash", "/usr/local/bin/backup-pg.sh"]
+        command: ['bash', '/usr/local/bin/backup-pg.sh']
         restart: unless-stopped
         networks:
-            - default
+            - backend
         deploy:
             resources:
                 limits:
-                    cpus: "0.5"
-                    memory: "512M"
+                    cpus: '0.5'
+                    memory: '512M'
                 reservations:
-                    memory: "128M"
+                    memory: '128M'
 
     pgadmin-server:
         container_name: pgadmin
@@ -395,13 +405,13 @@ services:
         environment:
             PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-}
             PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-}
-            PGADMIN_CONFIG_SERVER_MODE: "False"
+            PGADMIN_CONFIG_SERVER_MODE: 'False'
         volumes:
             - ${PGADMIN_DATA_PATH:-${DATA_PATH_HOST}/${PGADMIN_DATA_SUBDIR}}:/var/lib/pgadmin # 留空 PGADMIN_DATA_PATH → 自动拼装 ${DATA_PATH_HOST}/${PGADMIN_DATA_SUBDIR}
         ports:
-            - "${PGADMIN_PORT:-5050}:80"
+            - '${PGADMIN_PORT:-5050}:80'
         networks:
-            - default
+            - backend
         restart: unless-stopped
 
     #################   timescaledb  ########################
@@ -412,18 +422,18 @@ services:
         container_name: timescaledb
         image: ${TIMESCALE_IMAGE:-timescale/timescaledb:pg18}
         ports:
-            - "${TIMESCALE_PORT:-5433}:5432"
+            - '${TIMESCALE_PORT:-5433}:5432'
         environment:
             POSTGRES_USER: ${TIMESCALE_USER}
             POSTGRES_PASSWORD: ${TIMESCALE_PASSWORD}
             # TimescaleDB 必须在 shared_preload_libraries 中预加载
             POSTGRES_HOST_AUTH_METHOD: scram-sha-256
         # 官方镜像通过 POSTGRES_INITDB_ARGS/命令行注入 shared_preload_libraries
-        command: ["postgres", "-c", "shared_preload_libraries=timescaledb"]
+        command: ['postgres', '-c', 'shared_preload_libraries=timescaledb']
         volumes:
             - ${TIMESCALE_DATA_PATH:-${DATA_PATH_HOST}/${TIMESCALE_DATA_SUBDIR}}:/var/lib/postgresql/data # 留空 TIMESCALE_DATA_PATH → 自动拼装 ${DATA_PATH_HOST}/${TIMESCALE_DATA_SUBDIR}
         healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U ${TIMESCALE_USER:-postgres}"]
+            test: ['CMD-SHELL', 'pg_isready -U ${TIMESCALE_USER:-postgres}']
             interval: 30s
             timeout: 10s
             retries: 5
@@ -436,7 +446,7 @@ services:
                 reservations:
                     memory: ${TIMESCALE_RESERVATIONS_MEMORY:-1G}
         networks:
-            default:
+            backend:
                 aliases:
                     - timescaledb
         restart: unless-stopped
@@ -457,17 +467,17 @@ services:
         volumes:
             - ${TIMESCALE_BACKUP_DIR:-/data/timescaledb_backup}:/backup:rw
             - ../../include/shell/backup-timescaledb.sh:/usr/local/bin/backup-timescaledb.sh:ro
-        command: ["bash", "/usr/local/bin/backup-timescaledb.sh"]
+        command: ['bash', '/usr/local/bin/backup-timescaledb.sh']
         restart: unless-stopped
         networks:
-            - default
+            - backend
         deploy:
             resources:
                 limits:
-                    cpus: "0.5"
-                    memory: "512M"
+                    cpus: '0.5'
+                    memory: '512M'
                 reservations:
-                    memory: "128M"
+                    memory: '128M'
 
     #################   pgvector  ########################
     # pgvector：PostgreSQL 向量扩展，自建镜像（FROM hg_dnmpr_postgres:latest + apt pgvector）
@@ -486,14 +496,14 @@ services:
                 NO_PROXY: ${NO_PROXY}
             network: host # 使用主机网络解决DNS问题
         ports:
-            - "${PGVECTOR_PORT:-5434}:5432"
+            - '${PGVECTOR_PORT:-5434}:5432'
         environment:
             POSTGRES_USER: ${PGVECTOR_USER}
             POSTGRES_PASSWORD: ${PGVECTOR_PASSWORD}
         volumes:
             - ${PGVECTOR_DATA_PATH:-${DATA_PATH_HOST}/${PGVECTOR_DATA_SUBDIR}}:/var/lib/postgresql/data # 留空 PGVECTOR_DATA_PATH → 自动拼装 ${DATA_PATH_HOST}/${PGVECTOR_DATA_SUBDIR}
         healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U ${PGVECTOR_USER:-postgres}"]
+            test: ['CMD-SHELL', 'pg_isready -U ${PGVECTOR_USER:-postgres}']
             interval: 30s
             timeout: 10s
             retries: 5
@@ -506,7 +516,7 @@ services:
                 reservations:
                     memory: ${PGVECTOR_RESERVATIONS_MEMORY:-1G}
         networks:
-            default:
+            backend:
                 aliases:
                     - pgvector
         restart: unless-stopped
@@ -527,17 +537,17 @@ services:
         volumes:
             - ${PGVECTOR_BACKUP_DIR:-/data/pgvector_backup}:/backup:rw
             - ../../include/shell/backup-pgvector.sh:/usr/local/bin/backup-pgvector.sh:ro
-        command: ["bash", "/usr/local/bin/backup-pgvector.sh"]
+        command: ['bash', '/usr/local/bin/backup-pgvector.sh']
         restart: unless-stopped
         networks:
-            - default
+            - backend
         deploy:
             resources:
                 limits:
-                    cpus: "0.5"
-                    memory: "512M"
+                    cpus: '0.5'
+                    memory: '512M'
                 reservations:
-                    memory: "128M"
+                    memory: '128M'
 
     #################   clickhouse  ########################
     # ClickHouse：OLAP 列式数据库，自建镜像（FROM 官方 + 预置中国镜像源/时区/Prometheus）
@@ -557,20 +567,24 @@ services:
                 TZ: ${TZ:-Asia/Shanghai}
             network: host # 使用主机网络解决DNS问题
         ports:
-            - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
-            - "${CLICKHOUSE_TCP_PORT:-9000}:9000"
-            - "${CLICKHOUSE_INTERSERVER_PORT:-9009}:9009"
+            - '${CLICKHOUSE_HTTP_PORT:-8123}:8123'
+            - '${CLICKHOUSE_TCP_PORT:-9000}:9000'
+            - '${CLICKHOUSE_INTERSERVER_PORT:-9009}:9009'
         environment:
             CLICKHOUSE_USER: ${CLICKHOUSE_USER}
             CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
             TZ: ${TZ:-Asia/Shanghai}
         # 自定义 entrypoint：先用 CLICKHOUSE_PASSWORD 重写 users.d 密码哈希，再 exec 官方 entrypoint
-        command: ["/entrypoint-init.sh"]
+        command: ['/entrypoint-init.sh']
         volumes:
             - ${CLICKHOUSE_DATA_PATH:-${DATA_PATH_HOST}/${CLICKHOUSE_DATA_SUBDIR}}:/var/lib/clickhouse:rw
             - ${CLICKHOUSE_LOG_PATH:-/var/log/clickhouse-server}:/var/log/clickhouse-server:rw
         healthcheck:
-            test: ["CMD-SHELL", "curl -sf http://localhost:8123/?query=SELECT%201 >/dev/null 2>&1 || exit 1"]
+            test:
+                [
+                    'CMD-SHELL',
+                    'curl -sf http://localhost:8123/?query=SELECT%201 >/dev/null 2>&1 || exit 1',
+                ]
             interval: 30s
             timeout: 10s
             retries: 5
@@ -587,7 +601,7 @@ services:
                 reservations:
                     memory: ${CLICKHOUSE_RESERVATIONS_MEMORY:-1G}
         networks:
-            default:
+            backend:
                 aliases:
                     - clickhouse
         restart: unless-stopped
@@ -609,17 +623,17 @@ services:
         volumes:
             - ${CLICKHOUSE_BACKUP_DIR:-/data/clickhouse_backup}:/backup:rw
             - ../../include/shell/backup-clickhouse.sh:/usr/local/bin/backup-clickhouse.sh:ro
-        command: ["bash", "/usr/local/bin/backup-clickhouse.sh"]
+        command: ['bash', '/usr/local/bin/backup-clickhouse.sh']
         restart: unless-stopped
         networks:
-            - default
+            - backend
         deploy:
             resources:
                 limits:
-                    cpus: "0.5"
-                    memory: "512M"
+                    cpus: '0.5'
+                    memory: '512M'
                 reservations:
-                    memory: "128M"
+                    memory: '128M'
 
 volumes:
     # MySQL数据卷（已在mysql-server服务中使用）

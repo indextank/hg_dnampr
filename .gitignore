@@ -216,7 +216,6 @@ config/staging/
 secrets/
 *.secret
 api-keys.txt
-acme_renew_domain_cert.sh
 
 # ACME 按域名加密凭据库（默认位于 $HOME/.hg_acme_dns，此处为兜底防误入库）
 .hg_acme_dns/

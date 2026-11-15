@@ -726,36 +726,44 @@ execute_compose_command() {
         fi
     fi
 
-    # ── 确保主网络 hg_dnmpr_network 存在 ──────────────────────────────────
-    # compose/main.yaml 及所有独立栈（elk/rabbitmq/syncer/sgr/monitoring）均将
-    # hg_dnmpr_network 声明为 external，Docker Compose 不会自动创建。
-    # 若网络不存在，compose up 会直接报错拒绝启动。
-    # 此处在所有 up/start/restart 操作时统一预建网络（首次启动或网络被清理后）。
+    # ── 确保外部网络存在（Compose external: true 不会自动创建）──────────────
+    # - hg_dnmpr_network：前端/共享（nginx、PHP、独立栈互访）
+    # - hg_dnmpr_backend：DB/缓存；Web 入口不接入，降低失陷后横向移动
     if [[ "$operation" == "up" || "$operation" == "start" || "$operation" == "restart" ]]; then
-        if ! cr_cmd network inspect hg_dnmpr_network >/dev/null 2>&1; then
-            info "hg_dnmpr_network 不存在，自动创建..."
-            local _net_create_args=(--driver bridge --subnet 172.20.0.0/24)
-            # Docker 专有 opts：Podman 不支持 com.docker.*
+        local _ext_net _ext_subnet _ext_bridge _net_create_args
+        for _ext_net in hg_dnmpr_network hg_dnmpr_backend; do
+            if [[ "${_ext_net}" == "hg_dnmpr_network" ]]; then
+                _ext_subnet="172.20.0.0/24"
+                _ext_bridge="br-hg-dnmpr"
+            else
+                _ext_subnet="172.21.0.0/24"
+                _ext_bridge="br-hg-backend"
+            fi
+            if cr_cmd network inspect "${_ext_net}" >/dev/null 2>&1; then
+                info "${_ext_net} 已存在，跳过创建"
+                continue
+            fi
+            info "${_ext_net} 不存在，自动创建..."
+            _net_create_args=(--driver bridge --subnet "${_ext_subnet}")
             if cr_is_docker; then
                 _net_create_args+=(--opt com.docker.network.enable_ipv6=false)
-                _net_create_args+=(--opt com.docker.network.bridge.name=br-hg-dnmpr)
+                _net_create_args+=(--opt "com.docker.network.bridge.name=${_ext_bridge}")
             fi
             if [[ "${DRY_RUN:-false}" == "true" ]]; then
-                echo -e "${CYAN}[DRY-RUN]${NC} ${CR:-docker} network create ${_net_create_args[*]} hg_dnmpr_network"
+                echo -e "${CYAN}[DRY-RUN]${NC} ${CR:-docker} network create ${_net_create_args[*]} ${_ext_net}"
             else
-                cr_cmd network create "${_net_create_args[@]}" hg_dnmpr_network \
-                    && success "hg_dnmpr_network 创建成功" \
+                cr_cmd network create "${_net_create_args[@]}" "${_ext_net}" \
+                    && success "${_ext_net} 创建成功" \
                     || {
-                        if cr_cmd network inspect hg_dnmpr_network >/dev/null 2>&1; then
-                            info "hg_dnmpr_network 已由其他进程创建，继续..."
+                        if cr_cmd network inspect "${_ext_net}" >/dev/null 2>&1; then
+                            info "${_ext_net} 已由其他进程创建，继续..."
                         else
-                            error "hg_dnmpr_network 创建失败，请检查 $CR 权限或手动执行：\n  $CR network create --driver bridge --subnet 172.20.0.0/24 hg_dnmpr_network"
+                            error "${_ext_net} 创建失败，请检查 $CR 权限或手动执行：\n  $CR network create --driver bridge --subnet ${_ext_subnet} ${_ext_net}"
                         fi
                     }
             fi
-        else
-            info "hg_dnmpr_network 已存在，跳过创建"
-        fi
+        done
+        unset _ext_net _ext_subnet _ext_bridge _net_create_args
     fi
 
     # 防火墙预检（up/start/restart 操作，advisory 模式：任何内部错误均不阻塞启动）

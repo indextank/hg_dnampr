@@ -15,14 +15,14 @@ set -euo pipefail
 # ---------- 可在脚本头部自定义（也可用环境变量覆盖）----------
 # 密码长度（位）
 PASSWORD_LENGTH="${PASSWORD_LENGTH:-18}"
-# 允许出现的特殊符号。
-# 禁止纳入以下字符（否则会破坏 .env / Compose / bash 加载）：
-#   $  → Compose / dotenv 会把 $or、$HOME 等当成变量插值（WARNING: The "or" variable is not set）
-#   !  → 交互 bash 历史展开
-#   #  → load_env_file_exports / 部分 dotenv 会把 # 后当作注释截断
-#   ' " ` \ 空白 以及 < > & | ; ( ) { } [ ] → shell / YAML 元字符
-# 勿加入单引号 '（若日后改为单引号包裹写入会冲突）。
-SPECIAL_CHARS="${SPECIAL_CHARS:-~%^*,.-_}"
+# 允许出现的特殊符号（默认仅 _ . -，足以提高熵且兼容 Compose/shell）。
+# 禁止纳入以下字符（否则会破坏 .env / Compose / bash / 容器 command）：
+#   $        → Compose/dotenv 把 $or、$s4、$HOME 等当变量插值（构建末尾 WARNING）
+#   ! #      → bash 历史展开 / 注释截断
+#   ' " ` \  → 引号与转义（写入为 KEY=value 无引号，口令本身也禁止含引号）
+#   * ? ~ ^ % , @ : / + = 以及空白与 < > & | ; ( ) { } [ ]
+#     → glob、YAML/URL/shell 元字符，易在 requirepass/DSN 中踩坑
+SPECIAL_CHARS="${SPECIAL_CHARS:-_.-}"
 # 目标文件（相对仓库根或绝对路径）
 ENV_FILE="${ENV_FILE:-}"
 # ----------------------------------------
@@ -94,11 +94,25 @@ _rand_chars() {
     printf '%s' "${out:0:n}"
 }
 
-# 口令不得含 Compose/dotenv 可插值的 $VAR 形态，也不得含裸 $
+# 口令安全：禁止 Compose 插值符与 shell/YAML 元字符
 _is_compose_safe_secret() {
     local secret="$1"
-    # 任意 $ 均拒绝（含 $or、${or}、$1、$$ 等）
-    [[ "$secret" != *'$'* ]]
+    # 任意 $ 均拒绝（含 $or、${or}、$s4、$1、$$ 等 → WARNING: The "…" variable is not set）
+    [[ "$secret" != *'$'* ]] || return 1
+    # 引号：写入为无引号 KEY=value，口令本身禁止含引号
+    [[ "$secret" != *"'"* && "$secret" != *'"'* ]] || return 1
+    # 其余高风险元字符（即便当前 SPECIAL_CHARS 未包含，也防御环境变量覆盖）
+    case "$secret" in
+        *['"`\\!*#<>\&\|\;\(\)\{\}\[\]\?\~\^\%\,\@\:\/\+\=\ \	']*) return 1 ;;
+    esac
+    return 0
+}
+
+# 写成 KEY=value（不加引号）；安全靠字符集禁止 $ 等元字符保障
+_format_env_assignment() {
+    local key="$1"
+    local value="$2"
+    printf '%s=%s\n' "$key" "$value"
 }
 
 # 生成密码：首位仅为字母/数字，其余为字母数字+特殊符号；失败则重试
@@ -140,15 +154,32 @@ if (( PASSWORD_LENGTH < 2 )); then
     exit 1
 fi
 
-# 启动时拦截危险 SPECIAL_CHARS，避免误改脚本头部后又生成 $or 类口令
-if [[ "$SPECIAL_CHARS" == *'$'* ]]; then
-    echo "SPECIAL_CHARS 含有 \$，拒绝执行（Compose 会把密码中的 \$or 当成变量）" >&2
-    exit 1
-fi
-if [[ "$SPECIAL_CHARS" == *'#'* ]]; then
-    echo "SPECIAL_CHARS 含有 #，拒绝执行（env 加载可能把 # 后截断为注释）" >&2
-    exit 1
-fi
+# 启动时拦截危险 SPECIAL_CHARS
+case "$SPECIAL_CHARS" in
+    *\$*|*'!'*|*'#'*|*"'"*|*\"*|*\`*|*'\\'*|*' '* )
+        echo "SPECIAL_CHARS 含有禁止字符（\$ ! # 引号 反斜杠 空白等），拒绝执行" >&2
+        exit 1
+        ;;
+esac
+
+# 扫描现有 .env：若密钥已含 $，构建时必现 Compose WARNING，提示先轮换
+_existing_dollar=0
+_secret_key_list=" ${SECRET_KEYS[*]} "
+while IFS= read -r _line || [[ -n "$_line" ]]; do
+    [[ "$_line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+    _ek="${BASH_REMATCH[1]}"
+    _ev="${BASH_REMATCH[2]}"
+    [[ "$_secret_key_list" == *" ${_ek} "* ]] || continue
+    # 去掉已有外层引号再检查
+    if [[ "$_ev" == \"*\" || "$_ev" == \'*\' ]]; then
+        _ev="${_ev:1:${#_ev}-2}"
+    fi
+    if [[ "$_ev" == *'$'* ]]; then
+        echo "警告: ${_ek} 当前值含 \$，Compose/build 会报 variable is not set；请用本脚本写回轮换" >&2
+        _existing_dollar=$((_existing_dollar + 1))
+    fi
+done < "$ENV_FILE"
+unset _line _ek _ev _secret_key_list
 
 declare -A NEW_SECRETS=()
 local_key=""
@@ -160,11 +191,14 @@ echo "目标文件: $ENV_FILE"
 echo "密码长度: $PASSWORD_LENGTH"
 echo "特殊符号: $SPECIAL_CHARS"
 echo "模式:     $([[ "$DRY_RUN" == true ]] && echo dry-run || echo write)"
+if (( _existing_dollar > 0 )); then
+    echo "注意: 现有 .env 中有 ${_existing_dollar} 个口令含 \$（dry-run 不会修复，需去掉 --dry-run 写回）"
+fi
 echo "----------------------------------------"
 for local_key in "${SECRET_KEYS[@]}"; do
-    printf '%s=%s\n' "$local_key" "${NEW_SECRETS[$local_key]}"
+    _format_env_assignment "$local_key" "${NEW_SECRETS[$local_key]}"
     if ! _is_compose_safe_secret "${NEW_SECRETS[$local_key]}"; then
-        echo "内部错误: ${local_key} 仍含 \$，已中止（未写文件）" >&2
+        echo "内部错误: ${local_key} 含禁止字符，已中止（未写文件）" >&2
         exit 1
     fi
 done
@@ -188,7 +222,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
         key="${BASH_REMATCH[1]}"
         if [[ -n "${NEW_SECRETS[$key]+x}" ]]; then
-            printf '%s=%s\n' "$key" "${NEW_SECRETS[$key]}"
+            _format_env_assignment "$key" "${NEW_SECRETS[$key]}"
             updated=$((updated + 1))
             unset "NEW_SECRETS[$key]"
             continue
@@ -201,7 +235,7 @@ done < "$ENV_FILE" > "$tmp"
 for local_key in "${SECRET_KEYS[@]}"; do
     if [[ -n "${NEW_SECRETS[$local_key]+x}" ]]; then
         echo "警告: .env 中未找到 ${local_key}，已追加到文件末尾" >&2
-        printf '%s=%s\n' "$local_key" "${NEW_SECRETS[$local_key]}" >> "$tmp"
+        _format_env_assignment "$local_key" "${NEW_SECRETS[$local_key]}" >> "$tmp"
         missing=$((missing + 1))
         unset "NEW_SECRETS[$local_key]"
     fi

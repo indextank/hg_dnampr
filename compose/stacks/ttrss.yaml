@@ -80,7 +80,7 @@ services:
     # 用于自动执行 Docker 容器基础映像更新
     watchtower:
         <<: *default-common
-        image: containrrr/watchtower
+        image: containrrr/watchtower:1.7.1
         container_name: watchtower
         volumes:
             - /var/run/docker.sock:/var/run/docker.sock
