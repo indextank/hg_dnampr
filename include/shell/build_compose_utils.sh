@@ -140,9 +140,10 @@ detect_docker_environment() {
 
 load_build_environment_variables() {
     local config_dir="${ENV_DIR:-$SCRIPT_DIR/env}"
-    # php.env：供 compose 构建参数（如 PHP_IMAGE_INSTALL_NVM）插值，与 up.sh 行为一致。
+    # web.env：提供 GLOBAL_WEB_PATH/APACHE_LOG_DIR 等 compose 插值变量
+    # （此前缺失导致 ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z → "invalid spec"）；
     # 根目录 .env 最后加载，确保本地敏感配置覆盖所有分层配置。
-    local env_files=("base.env" "php.env" "syncer.env" "mysql.env" "postgres.env" "mongodb.env" "redis.env" "timescaledb.env" "pgvector.env" "clickhouse.env")
+    local env_files=("base.env" "web.env" "php.env" "syncer.env" "mysql.env" "postgres.env" "mongodb.env" "redis.env" "timescaledb.env" "pgvector.env" "clickhouse.env")
 
     set -a
     for env_file in "${env_files[@]}"; do
@@ -153,6 +154,8 @@ load_build_environment_variables() {
     load_env_file_exports "$PROJECT_DIR/.env.local"
     load_project_environment_from_base_env "$PROJECT_DIR"
     set +a
+    # 生成合并 env 文件，供 compose 在 sudo 环境下通过 --env-file 插值（见 write_compose_env_file）
+    write_compose_env_file || true
 }
 
 check_prerequisites() {
@@ -170,12 +173,12 @@ check_prerequisites() {
         error "未找到 $CR 命令，请先安装\n  Podman: dnf install -y podman\n  Docker: sudo apt-get install docker-ce"
     fi
 
-    # 检查运行时守护进程
-    if ! $CR info &>/dev/null 2>&1; then
+    # 检查运行时守护进程（经 cr_cmd，非 docker 组成员时会自动加 CR_SUDO）
+    if ! cr_cmd info &>/dev/null 2>&1; then
         if cr_is_podman; then
             error "Podman 服务未就绪，请执行: podman system migrate && podman system service start"
         else
-            error "Docker 守护进程未运行，请启动 Docker 服务\n  Linux: sudo systemctl start docker\n  macOS/Windows: 请启动 Docker Desktop"
+            error "Docker 守护进程未运行或当前用户无权限访问\n  启动服务: sudo systemctl start docker\n  免 sudo 构建: sudo usermod -aG docker ${USER:-ecs-user} 后重新登录\n  或确保 sudo docker info 可用（脚本会自动加 sudo）"
         fi
     fi
 
@@ -184,14 +187,18 @@ check_prerequisites() {
         error "未找到 Compose 工具，请安装\n  Podman: dnf install -y podman-compose 或 pip install podman-compose\n  Docker: sudo apt-get install docker-compose-plugin"
     fi
 
-    # 验证 Compose 可用
+    # 验证 Compose 可用（与 get_docker_compose_cmd 一致，需要时带 CR_SUDO）
     local -a _cc_chk=()
-    IFS=' ' read -r -a _cc_chk <<< "${COMPOSE_CMD}"
+    local _cc_head="${COMPOSE_CMD}"
+    [[ -n "${CR_SUDO:-}" ]] && _cc_head="${CR_SUDO} ${COMPOSE_CMD}"
+    IFS=' ' read -r -a _cc_chk <<< "${_cc_head}"
     if ! "${_cc_chk[@]}" version &>/dev/null 2>&1; then
-        error "Compose 命令 ($COMPOSE_CMD) 不可用"
+        error "Compose 命令 (${_cc_head}) 不可用"
     fi
 
-    success "容器运行时检测通过 (${CR}$($CR --version 2>/dev/null | head -1 || echo ''), $COMPOSE_CMD)"
+    local _cr_ver
+    _cr_ver="$(cr_cmd --version 2>/dev/null | head -1 || echo '')"
+    success "容器运行时检测通过 (${CR}${_cr_ver}, ${COMPOSE_CMD}${CR_NEEDS_SUDO:+, 自动 sudo})"
 }
 
 # 解决 docker compose build 在 bake 后端下 network:host 触发 BuildKit entitlement 报错的问题。

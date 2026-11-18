@@ -26,7 +26,13 @@ CONTAINERD_DATA_PATH="${CONTAINERD_DATA_PATH:-/data/containerd}"
 # 构建/安装代理：脚本内开关决定是否启用；账密来自系统 PROXY_*，勿写入本脚本。
 #   PROXY_SCHEME  PROXY_HOST  PROXY_PORT  [PROXY_USER]  [PROXY_PASS]
 # 临时覆盖（可选）：export DM_BUILD_PROXY_ENABLED=true DM_BUILD_PROXY_URL='...'
+# 海外强制启用（跳过地理位置门控）：export DM_BUILD_PROXY_FORCE=true
 # 测试：curl --proxy "${PROXY_SCHEME}://${PROXY_HOST}:${PROXY_PORT}" --proxy-user "${PROXY_USER}:${PROXY_PASS}" -I https://www.youtube.com
+#
+# 安全策略：
+#   - 非中国大陆默认跳过代理（直连）；仅国内或 FORCE 时才探测/启用
+#   - apt/dnf/yum 绝不写入持久系统配置；只在当次命令注入会话代理
+#   - 启动时清理历史残留的 95docker-manager-proxy / dnf.conf proxy 行
 BUILD_PROXY_ENABLED=false
 BUILD_PROXY_TYPE=socks5h
 BUILD_PROXY_URL=
@@ -172,12 +178,29 @@ dm_clear_session_proxy() {
     unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy 2>/dev/null || true
 }
 
-# 启动时探测：开关开启且 PROXY_*/显式 URL 可用则启用；否则直连
+# 是否强制启用代理（忽略地理位置）。接受 true/yes/on/1
+dm_is_proxy_force_enabled() {
+    case "${DM_BUILD_PROXY_FORCE:-${BUILD_PROXY_FORCE:-false}}" in
+        [Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn]|1) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# 启动时探测：非国内默认直连；国内（或 FORCE）且代理可达才启用会话代理
 dm_probe_build_proxy() {
     DM_PROXY_ENABLED=false
     DM_EFFECTIVE_PROXY_URL=""
     DM_EFFECTIVE_PROXY_TYPE=""
     DM_EFFECTIVE_NO_PROXY="${BUILD_NO_PROXY:-localhost,127.0.0.1,::1}"
+
+    # 先清掉历史持久化 apt/dnf 代理，避免代理失效后整机包管理瘫痪
+    dm_clear_package_manager_proxy
+
+    if [[ "${IS_CHINA_IP:-false}" != "true" ]] && ! dm_is_proxy_force_enabled; then
+        yellow "🌐 非中国大陆环境：跳过构建/安装代理（直连）。强制启用可设 DM_BUILD_PROXY_FORCE=true"
+        dm_clear_session_proxy
+        return 0
+    fi
 
     local proxy_type proxy_url no_proxy
     IFS=$'\t' read -r proxy_type proxy_url no_proxy <<< "$(dm_resolve_build_proxy_vars)"
@@ -218,49 +241,52 @@ _dm_mask_proxy_url() {
     fi
 }
 
-# 写入 apt/dnf 代理（安装 Docker 组件时使用）
+# 包管理器代理：禁止写入持久配置。历史版本会写 apt.conf.d / dnf.conf，此处仅负责清理残留。
 dm_configure_package_manager_proxy() {
-    [[ "$DM_PROXY_ENABLED" != true ]] || [[ -z "$DM_EFFECTIVE_PROXY_URL" ]] && return 0
-    get_sudo 2>/dev/null || true
-    [[ -z "${SUDO:-}" && "$(id -u)" -ne 0 ]] && return 0
-
-    if command_exists apt-get; then
-        $SUDO tee /etc/apt/apt.conf.d/95docker-manager-proxy >/dev/null <<EOF
-// 由 docker_manager.sh 生成 — 构建/安装代理
-Acquire::http::Proxy "${DM_EFFECTIVE_PROXY_URL}";
-Acquire::https::Proxy "${DM_EFFECTIVE_PROXY_URL}";
-EOF
-        green "✅ 已配置 apt 代理"
+    dm_clear_package_manager_proxy
+    if [[ "$DM_PROXY_ENABLED" == true && -n "$DM_EFFECTIVE_PROXY_URL" ]]; then
+        yellow "ℹ️  apt/dnf/yum 仅使用会话代理（不写 /etc）；代理失效不会拖垮系统包管理"
     fi
-
-    if [[ -f /etc/dnf/dnf.conf ]]; then
-        $SUDO sed -i '/^# docker_manager proxy$/d;/^proxy=/d;/^proxy_username=/d;/^proxy_password=/d' /etc/dnf/dnf.conf 2>/dev/null || true
-        $SUDO tee -a /etc/dnf/dnf.conf >/dev/null <<EOF
-
-# docker_manager proxy
-proxy=${DM_EFFECTIVE_PROXY_URL}
-EOF
-        green "✅ 已配置 dnf 代理"
-    elif [[ -f /etc/yum.conf ]]; then
-        $SUDO sed -i '/^# docker_manager proxy$/d;/^proxy=/d' /etc/yum.conf 2>/dev/null || true
-        $SUDO tee -a /etc/yum.conf >/dev/null <<EOF
-
-# docker_manager proxy
-proxy=${DM_EFFECTIVE_PROXY_URL}
-EOF
-        green "✅ 已配置 yum 代理"
-    fi
+    return 0
 }
 
 dm_clear_package_manager_proxy() {
     get_sudo 2>/dev/null || true
     [[ -z "${SUDO:-}" && "$(id -u)" -ne 0 ]] && return 0
+    # 本脚本历史写入
     $SUDO rm -f /etc/apt/apt.conf.d/95docker-manager-proxy 2>/dev/null || true
+    # 兼容其它常见残留名
+    $SUDO rm -f /etc/apt/apt.conf.d/proxy.conf /etc/apt/apt.conf.d/01proxy 2>/dev/null || true
     if [[ -f /etc/dnf/dnf.conf ]]; then
-        $SUDO sed -i '/^# docker_manager proxy$/d;/^proxy=/d' /etc/dnf/dnf.conf 2>/dev/null || true
+        $SUDO sed -i '/^# docker_manager proxy$/d;/^proxy=/d;/^proxy_username=/d;/^proxy_password=/d' /etc/dnf/dnf.conf 2>/dev/null || true
     fi
     if [[ -f /etc/yum.conf ]]; then
         $SUDO sed -i '/^# docker_manager proxy$/d;/^proxy=/d' /etc/yum.conf 2>/dev/null || true
+    fi
+}
+
+# 仅 HTTP(S) 代理可交给 apt Acquire::*；socks5 对 apt 无效
+dm_pkg_proxy_is_http() {
+    case "${DM_EFFECTIVE_PROXY_URL:-}" in
+        http://*|https://*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# 在子进程环境中执行包管理命令（会话级代理，命令结束即消失）
+dm_run_with_pkg_proxy() {
+    if [[ "$DM_PROXY_ENABLED" == true && -n "$DM_EFFECTIVE_PROXY_URL" ]] && dm_pkg_proxy_is_http; then
+        env \
+            http_proxy="$DM_EFFECTIVE_PROXY_URL" \
+            https_proxy="$DM_EFFECTIVE_PROXY_URL" \
+            HTTP_PROXY="$DM_EFFECTIVE_PROXY_URL" \
+            HTTPS_PROXY="$DM_EFFECTIVE_PROXY_URL" \
+            ALL_PROXY="$DM_EFFECTIVE_PROXY_URL" \
+            NO_PROXY="${DM_EFFECTIVE_NO_PROXY:-}" \
+            no_proxy="${DM_EFFECTIVE_NO_PROXY:-}" \
+            "$@"
+    else
+        "$@"
     fi
 }
 
@@ -404,11 +430,13 @@ dm_configure_docker_client_proxy() {
 }
 
 dm_configure_docker_proxy_stack() {
+    # 始终清理持久化 apt/dnf 代理残留（无论本次是否启用会话代理）
+    dm_clear_package_manager_proxy
     if [[ "$DM_PROXY_ENABLED" != true ]]; then
         dm_clear_docker_systemd_proxy
-        dm_clear_package_manager_proxy
         return 0
     fi
+    # 包管理器不写盘；仅配置 Docker 守护进程 / CLI（拉取镜像用）
     dm_configure_package_manager_proxy
     dm_configure_docker_systemd_proxy
     dm_configure_docker_client_proxy
@@ -416,12 +444,20 @@ dm_configure_docker_proxy_stack() {
 
 dm_show_proxy_status() {
     echo "-------------------------------------------"
+    echo "  地理位置: $([ "${IS_CHINA_IP:-false}" = true ] && echo '中国大陆' || echo '非中国大陆/未知')"
     if [[ "$DM_PROXY_ENABLED" == true ]]; then
-        green "构建/拉取代理: 已启用 (${DM_EFFECTIVE_PROXY_TYPE})"
-        echo "  URL: ${DM_EFFECTIVE_PROXY_URL%%@*}@***"
+        green "构建/拉取代理: 已启用 (${DM_EFFECTIVE_PROXY_TYPE}) — 仅本会话"
+        echo "  URL: $(_dm_mask_proxy_url "$DM_EFFECTIVE_PROXY_URL")"
         echo "  NO_PROXY: $DM_EFFECTIVE_NO_PROXY"
+        echo "  apt/dnf: 会话注入（不写 /etc）；HTTP(S) 代理才作用于 apt"
     else
-        yellow "构建/拉取代理: 未启用（探测失败或未配置）"
+        yellow "构建/拉取代理: 未启用（非国内跳过 / 探测失败 / 未配置）"
+        echo "  强制启用: DM_BUILD_PROXY_FORCE=true"
+    fi
+    if [[ -f /etc/apt/apt.conf.d/95docker-manager-proxy ]]; then
+        red "  警告: 仍存在持久 apt 代理文件，请检查清理是否成功"
+    else
+        echo "  持久 apt/dnf 代理: 已清理/未写入"
     fi
     echo "-------------------------------------------"
 }
@@ -493,14 +529,18 @@ detect_system() {
             exit 1
         fi
 
-        # 检测是否在中国
+        # 检测是否在中国（多源回退）
         IS_CHINA_IP=false
         CHINA_IP=0
         if command_exists curl; then
-            if curl -s --connect-timeout 3 "https://ipapi.co/country_code/" 2>/dev/null | grep -qi "CN\|China"; then
+            local _cc=""
+            _cc=$(curl -s --connect-timeout 3 --max-time 5 "https://ipapi.co/country_code/" 2>/dev/null | tr -d '\n\r ')
+            [[ -z "$_cc" ]] && _cc=$(curl -s --connect-timeout 3 --max-time 5 "http://ipinfo.io/country" 2>/dev/null | tr -d '\n\r ')
+            if echo "$_cc" | grep -qiE '^(CN|China)$'; then
                 IS_CHINA_IP=true
                 CHINA_IP=1
             fi
+            unset _cc
         fi
 
         export OS OS_ID OS_VERSION IS_WSL IS_CHINA_IP CHINA_IP
@@ -540,14 +580,18 @@ detect_system() {
         IS_WSL=true
     fi
 
-    # 检测是否在中国
+    # 检测是否在中国（多源回退；失败则视为非国内，避免误开代理）
     IS_CHINA_IP=false
     CHINA_IP=0
     if command_exists curl; then
-        if curl -s --connect-timeout 3 "https://ipapi.co/country_code/" 2>/dev/null | grep -qi "CN\|China"; then
+        local _cc=""
+        _cc=$(curl -s --connect-timeout 3 --max-time 5 "https://ipapi.co/country_code/" 2>/dev/null | tr -d '\n\r ')
+        [[ -z "$_cc" ]] && _cc=$(curl -s --connect-timeout 3 --max-time 5 "http://ipinfo.io/country" 2>/dev/null | tr -d '\n\r ')
+        if echo "$_cc" | grep -qiE '^(CN|China)$'; then
             IS_CHINA_IP=true
             CHINA_IP=1
         fi
+        unset _cc
     fi
 
     # 统一系统标识
@@ -796,11 +840,19 @@ wait_for_apt_lock() {
     return 0
 }
 
-# 安全的APT操作包装器
+# 安全的APT操作包装器（会话级代理：-o Acquire::*，不写 /etc/apt）
 safe_apt_update() {
     wait_for_apt_lock
     yellow "📦 更新软件包列表..."
-    if ! $SUDO apt-get update; then
+    local -a _apt_opts=()
+    if [[ "$DM_PROXY_ENABLED" == true && -n "$DM_EFFECTIVE_PROXY_URL" ]] && dm_pkg_proxy_is_http; then
+        _apt_opts+=(
+            -o "Acquire::http::Proxy=${DM_EFFECTIVE_PROXY_URL}"
+            -o "Acquire::https::Proxy=${DM_EFFECTIVE_PROXY_URL}"
+        )
+        yellow "🔗 本次 apt 使用会话代理（不持久化）"
+    fi
+    if ! dm_run_with_pkg_proxy $SUDO apt-get "${_apt_opts[@]}" update; then
         red "❌ 软件包列表更新失败"
         return 1
     fi
@@ -810,7 +862,14 @@ safe_apt_update() {
 safe_apt_install() {
     wait_for_apt_lock
     yellow "📦 安装软件包: $*"
-    if ! $SUDO apt-get install -y "$@"; then
+    local -a _apt_opts=()
+    if [[ "$DM_PROXY_ENABLED" == true && -n "$DM_EFFECTIVE_PROXY_URL" ]] && dm_pkg_proxy_is_http; then
+        _apt_opts+=(
+            -o "Acquire::http::Proxy=${DM_EFFECTIVE_PROXY_URL}"
+            -o "Acquire::https::Proxy=${DM_EFFECTIVE_PROXY_URL}"
+        )
+    fi
+    if ! dm_run_with_pkg_proxy $SUDO apt-get "${_apt_opts[@]}" install -y "$@"; then
         red "❌ 软件包安装失败: $*"
         return 1
     fi
@@ -1070,8 +1129,8 @@ install_docker_rhel() {
     # 卸载旧版本
     $SUDO $PKG_MGR remove docker docker-client docker-client-latest docker-common docker-latest docker-latest-logrotate docker-logrotate docker-engine -y 2>/dev/null || true
 
-    # 安装依赖
-    $SUDO $PKG_MGR install -y yum-utils device-mapper-persistent-data lvm2
+    # 安装依赖（会话级代理，不写 dnf.conf）
+    dm_run_with_pkg_proxy $SUDO $PKG_MGR install -y yum-utils device-mapper-persistent-data lvm2
 
     # 定义镜像源列表
     local repo_urls=(
@@ -1188,9 +1247,15 @@ EOF
     # 安装流程自动修复仓库连通性配置（菜单 1 默认生效）
     fix_docker_ce_repo_connectivity
 
-    # 安装Docker
+    # 安装Docker（会话级代理）
     yellow "📦 正在安装Docker..."
-    $SUDO $PKG_MGR install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    if [[ "$DM_PROXY_ENABLED" == true ]] && dm_pkg_proxy_is_http; then
+        dm_run_with_pkg_proxy $SUDO $PKG_MGR --setopt="proxy=${DM_EFFECTIVE_PROXY_URL}" install -y \
+            docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    else
+        dm_run_with_pkg_proxy $SUDO $PKG_MGR install -y \
+            docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    fi
 
     green "✅ RHEL/CentOS Docker安装完成"
 }
@@ -1389,17 +1454,33 @@ upgrade_docker_and_compose() {
             # 修复仓库连通性，避免 docker-ce 包不可用
             fix_docker_ce_repo_connectivity
             if command_exists dnf; then
-                $SUDO dnf makecache --refresh -y >/dev/null 2>&1 || true
-                $SUDO dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || {
-                    red "❌ dnf 更新 Docker 失败"
-                    return 1
-                }
+                dm_run_with_pkg_proxy $SUDO dnf makecache --refresh -y >/dev/null 2>&1 || true
+                if [[ "$DM_PROXY_ENABLED" == true ]] && dm_pkg_proxy_is_http; then
+                    dm_run_with_pkg_proxy $SUDO dnf --setopt="proxy=${DM_EFFECTIVE_PROXY_URL}" install -y \
+                        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || {
+                        red "❌ dnf 更新 Docker 失败"
+                        return 1
+                    }
+                else
+                    $SUDO dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || {
+                        red "❌ dnf 更新 Docker 失败"
+                        return 1
+                    }
+                fi
             else
-                $SUDO yum makecache fast >/dev/null 2>&1 || true
-                $SUDO yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || {
-                    red "❌ yum 更新 Docker 失败"
-                    return 1
-                }
+                dm_run_with_pkg_proxy $SUDO yum makecache fast >/dev/null 2>&1 || true
+                if [[ "$DM_PROXY_ENABLED" == true ]] && dm_pkg_proxy_is_http; then
+                    dm_run_with_pkg_proxy $SUDO yum --setopt="proxy=${DM_EFFECTIVE_PROXY_URL}" install -y \
+                        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || {
+                        red "❌ yum 更新 Docker 失败"
+                        return 1
+                    }
+                else
+                    $SUDO yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || {
+                        red "❌ yum 更新 Docker 失败"
+                        return 1
+                    }
+                fi
             fi
             ;;
         opensuse)
@@ -2535,10 +2616,10 @@ verify_docker_installation() {
 install_docker() {
     green "开始安装Docker..."
 
-    # 安装前写入 apt/dnf 代理（若启动时已探测可用）
-    if [ "$DM_PROXY_ENABLED" = true ]; then
-        dm_configure_package_manager_proxy
-    fi
+    # 安装前清理历史持久化 apt/dnf 代理；本次仅会话注入（见 safe_apt_* / dm_run_with_pkg_proxy）
+    dm_clear_package_manager_proxy
+    # 确保异常退出也不留下包管理器持久代理
+    trap 'dm_clear_package_manager_proxy' RETURN
 
     # 检查是否已安装Docker
     if command_exists docker && (command_exists docker-compose || [ -e "/usr/bin/docker-compose" ]); then
@@ -2632,8 +2713,10 @@ install_docker() {
     # 验证安装
     verify_docker_installation
 
-    # 将可用代理写入 systemd / CLI / 包管理器，供后续 docker pull 与组件安装使用
+    # Docker 守护进程/CLI 代理（拉取镜像）；apt/dnf 永不持久化
     dm_configure_docker_proxy_stack
+    dm_clear_package_manager_proxy
+    trap - RETURN
 
     green "🎉 Docker安装完成！"
     dm_show_proxy_status

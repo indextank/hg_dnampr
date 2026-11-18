@@ -121,6 +121,50 @@ load_env_file_exports() {
     unset _env_line
 }
 
+# 生成合并的 compose env 文件（默认 build/.env.compose）。
+# compose 需要 env/*.env 与根目录 .env/.env.local 中的变量做插值；
+# 当 compose 以 sudo 调用（用户不在 docker 组）时，进程环境被 env_reset 剥离，
+# 插值拿空值会导致 "invalid spec: empty section between colons" 等错误，
+# 因此按相同优先级落盘为文件，由 get_docker_compose_cmd 追加 --env-file 传入。
+# 同名变量后写覆盖先写，与 load_env_file_exports 的加载语义一致。
+write_compose_env_file() {
+    local _project_dir="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+    local _env_dir="${ENV_DIR:-$_project_dir/env}"
+    local _merged_file="$_project_dir/build/.env.compose"
+    local _order=(
+        "$_env_dir/base.env"
+        "$_env_dir/web.env"
+        "$_env_dir/php.env"
+        "$_env_dir/mysql.env"
+        "$_env_dir/postgres.env"
+        "$_env_dir/mongodb.env"
+        "$_env_dir/redis.env"
+        "$_env_dir/timescaledb.env"
+        "$_env_dir/pgvector.env"
+        "$_env_dir/clickhouse.env"
+        "$_env_dir/elk.env"
+        "$_env_dir/apps.env"
+        "$_env_dir/rabbitmq.env"
+        "$_env_dir/canal.env"
+        "$_env_dir/syncer.env"
+        "$_project_dir/.env"
+        "$_project_dir/.env.local"
+    )
+    mkdir -p "$(dirname "$_merged_file")" 2>/dev/null || true
+    {
+        echo "# 自动生成（write_compose_env_file），请勿手工编辑；每次加载配置时重新生成"
+        local _f _line
+        for _f in "${_order[@]}"; do
+            [[ -f "$_f" ]] || continue
+            while IFS= read -r _line; do
+                printf '%s\n' "$_line"
+            done < <(grep -E '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=' "$_f" 2>/dev/null || true)
+        done
+    } > "$_merged_file" 2>/dev/null || return 1
+    export COMPOSE_ENV_FILE="$_merged_file"
+    return 0
+}
+
 # 从 env/base.env 读取默认项目环境，再由根目录 .env/.env.local 覆盖。
 # 对外导出：
 #   ENVIRONMENT                 development|production
@@ -591,6 +635,9 @@ load_config_files() {
 
     success "分层配置文件加载完成"
 
+    # 同步生成 compose 插值用合并 env 文件（供 sudo 场景下 --env-file 读取）
+    write_compose_env_file || true
+
     # MySQL：按 MYSQL_BUILD_VERSION 解析通道最新版 → MYSQL_VER
     derive_mysql_build_ver
 
@@ -917,10 +964,19 @@ get_docker_compose_cmd() {
         return 1
     fi
     # 若需要 sudo（当前用户不在 docker 组），在 COMPOSE_CMD 前加 sudo
+    # sudo 默认 env_reset 会剥离导出的构建变量，compose 插值会拿到空值
+    # （如 ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z → "invalid spec: empty section between colons"）。
+    # 故存在合并 env 文件时，始终追加 --env-file，让插值走文件而非进程环境。
+    local _compose_env_args=""
+    if [[ -n "${COMPOSE_ENV_FILE:-}" && -f "$COMPOSE_ENV_FILE" ]]; then
+        _compose_env_args=" --env-file $COMPOSE_ENV_FILE"
+    elif [[ -n "${PROJECT_DIR:-}" && -f "$PROJECT_DIR/build/.env.compose" ]]; then
+        _compose_env_args=" --env-file $PROJECT_DIR/build/.env.compose"
+    fi
     if [[ -n "${CR_SUDO:-}" ]]; then
-        echo "${CR_SUDO} ${COMPOSE_CMD}"
+        echo "${CR_SUDO} ${COMPOSE_CMD}${_compose_env_args}"
     else
-        echo "$COMPOSE_CMD"
+        echo "${COMPOSE_CMD}${_compose_env_args}"
     fi
     return 0
 }
@@ -938,7 +994,7 @@ ${YELLOW}服务名:${NC}
     nginx, tengine                                    - Web服务器 ⚠️ 二选一
     mysql, mysql                                   - MySQL数据库 ⚠️ 二选一
     redis, valkey                                     - 缓存服务
-    mongo, postgresql                                 - 其他数据库
+    mongo|mongodb, postgres|postgresql                - 其他数据库
     rabbitmq                                         - RabbitMQ消息队列
     canal, canal-server                              - Canal 服务
     syncer                                           - MySQL ➜ Elasticsearch 同步服务
@@ -1051,7 +1107,7 @@ ${YELLOW}服务名:${NC}
     nginx, tengine                                    - Web服务器 ⚠️ 二选一
     mysql, mysql                                   - MySQL数据库 ⚠️ 二选一
     redis, valkey                                     - 缓存服务
-    mongo, postgresql                                 - 其他数据库
+    mongo|mongodb, postgres|postgresql                - 其他数据库
     rabbitmq                                         - RabbitMQ消息队列
     canal, canal-server                              - Canal 服务
     syncer                                           - MySQL ➜ Elasticsearch 同步服务

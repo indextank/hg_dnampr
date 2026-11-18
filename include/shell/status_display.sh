@@ -138,6 +138,7 @@ show_container_status() {
             elk)      _expanded_filters+=(elasticsearch kibana logstash) ;;
             monitoring) _expanded_filters+=(prometheus grafana) ;;
             postgresql) _expanded_filters+=(postgres) ;;
+            mongodb)  _expanded_filters+=(mongo) ;;
             *)        _expanded_filters+=("$_f") ;;
         esac
     done

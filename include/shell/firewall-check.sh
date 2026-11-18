@@ -531,12 +531,12 @@ _fw_offer_fix_ufw_forward_policy() {
 
             local retries=0
             while [[ $retries -lt 15 ]]; do
-                $CR info >/dev/null 2>&1 && break
+                cr_cmd info >/dev/null 2>&1 && break
                 sleep 1
                 retries=$((retries + 1))
             done
 
-            if $CR info >/dev/null 2>&1; then
+            if cr_cmd info >/dev/null 2>&1; then
                 _fw_log_success "UFW + Docker 修复完成，容器网络已恢复正常"
                 return 0
             else
@@ -579,13 +579,13 @@ _fw_resolve_bridge_name() {
     local fallback_bridge_name="${2:-$_FW_DOCKER_BRIDGE_NAME}"
     local detected_bridge_name=""
 
-    if ! $CR info >/dev/null 2>&1; then
+    if ! cr_cmd info >/dev/null 2>&1; then
         echo "$fallback_bridge_name"
         return 0
     fi
 
-    if $CR network inspect "$network_name" >/dev/null 2>&1; then
-        detected_bridge_name=$($CR network inspect "$network_name" \
+    if cr_cmd network inspect "$network_name" >/dev/null 2>&1; then
+        detected_bridge_name=$(cr_cmd network inspect "$network_name" \
             --format '{{index .Options "com.docker.network.bridge.name"}}' 2>/dev/null) || true
 
         if [[ -n "$detected_bridge_name" && "$detected_bridge_name" != "<no value>" ]]; then
@@ -724,7 +724,7 @@ _fw_is_docker_iptables_disabled() {
 
     # Method 2: 容器运行时 info — authoritative source, slightly slower
     local cr_info
-    cr_info=$($CR info 2>/dev/null) || return 1
+    cr_info=$(cr_cmd info 2>/dev/null) || return 1
     if echo "$cr_info" | grep -qi 'iptables: false'; then
         return 0
     fi

@@ -17,11 +17,12 @@ restore_temp_dockerignore() {
     if [[ -f "$stable_backup" ]]; then
         mv -f "$stable_backup" "$PROJECT_DIR/.dockerignore"
     fi
-    # 清理动态生成的混合 ignorefile
-    if [[ -n "${GENERATED_MIXED_IGNOREFILE:-}" && -f "${GENERATED_MIXED_IGNOREFILE}" ]]; then
-        rm -f "${GENERATED_MIXED_IGNOREFILE}"
-        GENERATED_MIXED_IGNOREFILE=""
-    fi
+    # 清理动态生成的混合 ignorefile。
+    # 注意：不能依赖 GENERATED_MIXED_IGNOREFILE 判断 —— 该变量是在
+    # $( ) 命令替换子 shell 中赋值的，不会传播回父 shell，按变量清理必然遗漏；
+    # mixed_auto 是纯生成物（_auto 后缀，无人工维护场景），无条件清理安全。
+    rm -f "$PROJECT_DIR/.dockerignore.mixed_auto"
+    GENERATED_MIXED_IGNOREFILE=""
 }
 
 is_php_build_target() {

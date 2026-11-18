@@ -89,7 +89,7 @@ MYSQL_BIND_HOST_CLI_SET="false"
 while [[ $# -gt 0 ]]; do
     case $1 in
         # 服务名
-        php85|php84|php83|php82|php81|php80|php74|nginx|tengine|mysql|mysql_backup|redis|valkey|mongo|postgres|postgresql|pgadmin|timescaledb|timescaledb_backup|pgvector|pgvector_backup|clickhouse|clickhouse_backup|elk|elasticsearch|kibana|logstash|sgr|spug|gitea|rap2-dolores|rap2-delos|rabbitmq|syncer|canal|canal-server|monitoring|prometheus|grafana|syncer-prometheus|syncer-grafana|all)
+        php85|php84|php83|php82|php81|php80|php74|nginx|tengine|mysql|mysql_backup|redis|valkey|mongo|mongodb|postgres|postgresql|pgadmin|timescaledb|timescaledb_backup|pgvector|pgvector_backup|clickhouse|clickhouse_backup|elk|elasticsearch|kibana|logstash|sgr|spug|gitea|rap2-dolores|rap2-delos|rabbitmq|syncer|canal|canal-server|monitoring|prometheus|grafana|syncer-prometheus|syncer-grafana|all)
             SERVICES+=("$1")
             shift
             ;;

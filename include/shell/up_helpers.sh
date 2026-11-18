@@ -200,7 +200,7 @@ show_help() {
     nginx, tengine                                    - Web 服务器（二选一）
     mysql                                            - MySQL 数据库
     redis, valkey                                     - 缓存服务
-    mongo, postgres                                   - 其他数据库
+    mongo|mongodb, postgres|postgresql                - 其他数据库
     rabbitmq                                         - RabbitMQ 消息队列
     canal, canal-server                              - Canal 服务
     syncer                                           - MySQL -> Elasticsearch 同步服务

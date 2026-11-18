@@ -54,6 +54,17 @@ fi
 # 执行 Docker 环境检测（source 之后调用，info() 已可用）
 detect_docker_environment
 
+# 单实例保护：.dockerignore 的临时切换是「全局文件 + trap 还原」机制，
+# 并发运行时另一实例退出会将其还原，导致 buildkit 懒计算的 COPY cache key
+# 读到被还原的排除规则，报 "COPY ./src/php": not found 等瞬时假错。
+# flock 锁随进程退出（含 SIGKILL）自动释放，无需手工清理。
+BUILD_INSTANCE_LOCK="$PROJECT_DIR/build/.build.lock"
+mkdir -p "$PROJECT_DIR/build"
+exec 9>"$BUILD_INSTANCE_LOCK"
+if ! flock -n 9; then
+    error "检测到另一个 build.sh 实例正在运行（锁: $BUILD_INSTANCE_LOCK）\n并发构建会互相破坏 .dockerignore 临时切换机制，请等待当前构建完成，\n或先确认旧实例已停止（ps aux | grep build.sh）后重试"
+fi
+
 # 构建代理默认配置。
 # 代理只允许通过 BUILD_PROXY_TYPE 与 BUILD_PROXY_URL 配置；HTTP_PROXY/HTTPS_PROXY 由脚本在构建阶段派生。
 DEFAULT_NO_PROXY="localhost,127.0.0.1,::1"
@@ -815,7 +826,7 @@ fi
 while [[ $# -gt 0 ]]; do
     case $1 in
         # 服务名
-        php85|php84|php83|php82|php81|php80|php74|nginx|tengine|mysql|mysql_backup|redis|valkey|mongo|postgres|postgresql|pgadmin|timescaledb|timescaledb_backup|pgvector|pgvector_backup|clickhouse|clickhouse_backup|elk|elasticsearch|kibana|logstash|sgr|spug|gitea|rap2-dolores|rap2-delos|rabbitmq|syncer|canal|canal-server|monitoring|prometheus|grafana|syncer-prometheus|syncer-grafana|all)
+        php85|php84|php83|php82|php81|php80|php74|nginx|tengine|mysql|mysql_backup|redis|valkey|mongo|mongodb|postgres|postgresql|pgadmin|timescaledb|timescaledb_backup|pgvector|pgvector_backup|clickhouse|clickhouse_backup|elk|elasticsearch|kibana|logstash|sgr|spug|gitea|rap2-dolores|rap2-delos|rabbitmq|syncer|canal|canal-server|monitoring|prometheus|grafana|syncer-prometheus|syncer-grafana|all)
             SERVICES+=("$1")
             shift
             ;;

@@ -49,8 +49,8 @@ map_service_name() {
         mysql_backup) echo "mysql_backup" ;;
         redis) echo "redis" ;;
         valkey) echo "valkey" ;;
-        mongo) echo "mongo" ;;
-        postgresql) echo "postgres" ;;
+        mongo|mongodb) echo "mongo" ;;
+        postgres|postgresql) echo "postgres" ;;
         pgadmin) echo "pgadmin" ;;
         timescaledb) echo "timescaledb" ;;
         timescaledb_backup) echo "timescaledb_backup" ;;
