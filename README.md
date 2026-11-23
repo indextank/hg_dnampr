@@ -48,14 +48,14 @@
 
 覆盖关系型、文档、时序、向量、列存与内存缓存六类，**互不干扰、各自独立数据目录**：
 
-| 场景 | 服务 | 说明 |
-| --- | --- | --- |
-| 关系型 | `mysql` / `postgres` | 主业务库；MySQL 三档配置档（见下文） |
-| 文档 | `mongo` | 附带 Mongo Express Web 管理界面 |
-| 时序 | `timescaledb` | PostgreSQL + Timescale 扩展 |
-| 向量 | `pgvector` | PostgreSQL + 向量检索扩展，适配 AI / 语义检索 |
-| OLAP 列存 | `clickhouse` | 分析型列存，内置 Prometheus 指标端点 |
-| 内存缓存 | `redis` / `valkey` | 口令由 Compose 注入 `--requirepass`，配置不明文保存 |
+| 场景      | 服务                 | 说明                                                |
+| --------- | -------------------- | --------------------------------------------------- |
+| 关系型    | `mysql` / `postgres` | 主业务库；MySQL 三档配置档（见下文）                |
+| 文档      | `mongo`              | 附带 Mongo Express Web 管理界面                     |
+| 时序      | `timescaledb`        | PostgreSQL + Timescale 扩展                         |
+| 向量      | `pgvector`           | PostgreSQL + 向量检索扩展，适配 AI / 语义检索       |
+| OLAP 列存 | `clickhouse`         | 分析型列存，内置 Prometheus 指标端点                |
+| 内存缓存  | `redis` / `valkey`   | 口令由 Compose 注入 `--requirepass`，配置不明文保存 |
 
 ### 🔄 数据同步链路（CDC ➜ 消息 ➜ 索引）
 
@@ -82,10 +82,10 @@ flowchart LR
 
 ### 🛠️ 研发工具链（`sgr` 组合，工程 `hg_dnmpr_sgr`）
 
-| 工具 | 用途 |
-| --- | --- |
-| `spug` | 轻量运维 / 发布平台 |
-| `gitea` | 自托管 Git 代码托管 |
+| 工具                          | 用途                |
+| ----------------------------- | ------------------- |
+| `spug`                        | 轻量运维 / 发布平台 |
+| `gitea`                       | 自托管 Git 代码托管 |
 | `rap2-dolores` / `rap2-delos` | API 接口文档与 Mock |
 
 ### 📰 内容聚合（`ttrss` 组合，工程 `hg_dnmpr_ttrss`）
@@ -100,32 +100,32 @@ Tiny Tiny RSS + `mercury` 正文解析 + `opencc` 简繁转换 + `rsshub` 生成
 
 ### 主栈（工程 `hg_dnmpr`）
 
-| 服务 | 宿主端口（默认） | 版本开关 |
-| --- | --- | --- |
-| `nginx` / `tengine` | HTTP `80`、HTTPS `443` | — |
-| `php74` … `php85` | `8074`–`8085` | `env/php.env` |
-| `mysql` | `3306` | `MYSQL_BUILD_VERSION`（`8.0`/`8.4`/`9.7`） |
-| `postgres` | `5432` | `PG_MAJOR` |
-| `pgadmin` | `65050` | — |
-| `timescaledb` | `5433` | `env/timescaledb.env` |
-| `pgvector` | `5434` | `PGVECTOR_PG_MAJOR` |
-| `mongo` | `60017` | `MONGO_BUILD_VERSION` |
-| `mongo express` | `8081` | — |
-| `clickhouse` | HTTP `8123` / TCP `9000` | `CLICKHOUSE_BUILD_VERSION` |
-| `redis` | `63079` | `REDIS_BUILD_VERSION` |
-| `valkey` | 见 `env/redis.env` | `VALKEY_BUILD_VERSION` |
+| 服务                | 宿主端口（默认）         | 版本开关                                   |
+| ------------------- | ------------------------ | ------------------------------------------ |
+| `nginx` / `tengine` | HTTP `80`、HTTPS `443`   | —                                          |
+| `php74` … `php85`   | `8074`–`8085`            | `env/php.env`                              |
+| `mysql`             | `3306`                   | `MYSQL_BUILD_VERSION`（`8.0`/`8.4`/`9.7`） |
+| `postgres`          | `5432`                   | `PG_MAJOR`                                 |
+| `pgadmin`           | `65050`                  | —                                          |
+| `timescaledb`       | `5433`                   | `env/timescaledb.env`                      |
+| `pgvector`          | `5434`                   | `PGVECTOR_PG_MAJOR`                        |
+| `mongo`             | `60017`                  | `MONGO_BUILD_VERSION`                      |
+| `mongo express`     | `8081`                   | —                                          |
+| `clickhouse`        | HTTP `8123` / TCP `9000` | `CLICKHOUSE_BUILD_VERSION`                 |
+| `redis`             | `63079`                  | `REDIS_BUILD_VERSION`                      |
+| `valkey`            | 见 `env/redis.env`       | `VALKEY_BUILD_VERSION`                     |
 
 ### 独立栈
 
-| 组合入口 | Compose 文件 | 工程名 | 组件（宿主端口） |
-| --- | --- | --- | --- |
-| `elk` | `compose/stacks/elk.yaml` | `hg_dnmpr_elk` | Elasticsearch `9333` · Kibana `56001` · Logstash `5044/9600/8050`（`ELK_BUILD_VERSION`） |
-| `rabbitmq` / `canal` | `compose/stacks/rabbitmq.yaml` | `hg_dnmpr_rabbitmq` | RabbitMQ `56072`（管理台 `51672`）· Canal `11110/11111/11112` |
-| `syncer` | `compose/stacks/syncer.yaml` | `hg_dnmpr_syncer` | Syncer `8080` |
-| `monitoring` | `compose/stacks/monitoring.yaml` | `hg_dnmpr_monitoring` | Prometheus `9090` · Grafana `3000` · exporters 等 |
-| `sgr` | `compose/stacks/sgr.yaml` | `hg_dnmpr_sgr` | Spug `8000` · Gitea `3000`(+SSH `2220`) · Rap2 `28081` |
-| `ttrss` | `compose/stacks/ttrss.yaml` | `hg_dnmpr_ttrss` | TTRSS `8181` · RSSHub `61200` |
-| `all` | 主栈聚合 | `hg_dnmpr` | 主栈可构建服务集合 |
+| 组合入口             | Compose 文件                     | 工程名                | 组件（宿主端口）                                                                         |
+| -------------------- | -------------------------------- | --------------------- | ---------------------------------------------------------------------------------------- |
+| `elk`                | `compose/stacks/elk.yaml`        | `hg_dnmpr_elk`        | Elasticsearch `9333` · Kibana `56001` · Logstash `5044/9600/8050`（`ELK_BUILD_VERSION`） |
+| `rabbitmq` / `canal` | `compose/stacks/rabbitmq.yaml`   | `hg_dnmpr_rabbitmq`   | RabbitMQ `56072`（管理台 `51672`）· Canal `11110/11111/11112`                            |
+| `syncer`             | `compose/stacks/syncer.yaml`     | `hg_dnmpr_syncer`     | Syncer `8080`                                                                            |
+| `monitoring`         | `compose/stacks/monitoring.yaml` | `hg_dnmpr_monitoring` | Prometheus `9090` · Grafana `3000` · exporters 等                                        |
+| `sgr`                | `compose/stacks/sgr.yaml`        | `hg_dnmpr_sgr`        | Spug `8000` · Gitea `3000`(+SSH `2220`) · Rap2 `28081`                                   |
+| `ttrss`              | `compose/stacks/ttrss.yaml`      | `hg_dnmpr_ttrss`      | TTRSS `8181` · RSSHub `61200`                                                            |
+| `all`                | 主栈聚合                         | `hg_dnmpr`            | 主栈可构建服务集合                                                                       |
 
 **镜像命名约定**
 
@@ -149,7 +149,7 @@ hg_dnmpr/
 │   ├── stacks/               # web / php / databases / elk / rabbitmq / syncer / monitoring / sgr / ttrss
 │   └── overlays/             # dev / prod / wsl / docker-opts / elk-nginx
 ├── build/<组件>/<版本>/       # 各服务 Dockerfile 与配置上下文
-├── include/shell/            # 公共库（env_loader、proxy、compose_orchestrator、service_catalog、version_resolve…）
+├── include/shell/            # 公共库（env_loader、env_scope、proxy、compose_orchestrator、service_catalog、version_resolve…）
 ├── vhost/                    # Nginx / Tengine / Apache 站点配置
 ├── scripts/                  # 校验、备份、巡检脚本
 └── docs/                     # 专题文档
@@ -194,14 +194,14 @@ flowchart TD
 
 ## 环境要求
 
-| 项 | 要求 / 说明 |
-| --- | --- |
-| 宿主 OS | Linux 或 Windows + WSL2（仓库位于 `E:\hg_dnmpr`，WSL 挂载为 `/mnt/e/hg_dnmpr`） |
-| 容器运行时 | Docker（含 Compose V2）**或** Podman；缺失时用 `docker_manager.sh` / `podman_manager.sh` 安装修复 |
-| Shell | Bash（脚本主体语言，**不可用 `sh` 直接执行**） |
-| 换行 | 强制 LF（`.gitattributes` 已约束 `*.sh` / `*.env` / `*.cnf` / `*.yaml` 等） |
-| WSL 网络 | WSL2 默认 NAT，**不镜像** localhost 代理；需代理时显式配置 `PROXY_*` 并置 `BUILD_PROXY_ENABLED=true` |
-| 行号约定 | 命令与校验默认在 WSL 内执行；PowerShell 仅用于宿主侧操作（git、文件复制、Windows 服务） |
+| 项         | 要求 / 说明                                                                                          |
+| ---------- | ---------------------------------------------------------------------------------------------------- |
+| 宿主 OS    | Linux 或 Windows + WSL2（仓库位于 `E:\hg_dnmpr`，WSL 挂载为 `/mnt/e/hg_dnmpr`）                      |
+| 容器运行时 | Docker（含 Compose V2）**或** Podman；缺失时用 `docker_manager.sh` / `podman_manager.sh` 安装修复    |
+| Shell      | Bash（脚本主体语言，**不可用 `sh` 直接执行**）                                                       |
+| 换行       | 强制 LF（`.gitattributes` 已约束 `*.sh` / `*.env` / `*.cnf` / `*.yaml` 等）                          |
+| WSL 网络   | WSL2 默认 NAT，**不镜像** localhost 代理；需代理时显式配置 `PROXY_*` 并置 `BUILD_PROXY_ENABLED=true` |
+| 行号约定   | 命令与校验默认在 WSL 内执行；PowerShell 仅用于宿主侧操作（git、文件复制、Windows 服务）              |
 
 ---
 
@@ -258,13 +258,13 @@ cp .env.example .env    # 然后编辑 .env
 
 ### 构建代理
 
-| 项 | 说明 |
-| --- | --- |
-| 开关 | `.env` 中 `BUILD_PROXY_ENABLED=true\|false` |
-| 类型偏好 | `BUILD_PROXY_TYPE`（如 `socks5h`）；空则回落 `PROXY_SCHEME` |
-| 凭据真源 | 系统环境：`PROXY_SCHEME` `PROXY_HOST` `PROXY_PORT` `[PROXY_USER]` `[PROXY_PASS]` |
-| URL | **禁止**写入 `.env`；仅当开关开启时由 `include/shell/proxy.sh`（及 `docker_manager` / `podman_manager` / `acme_renew_domain_cert.sh`）拼装 |
-| 临时覆盖 | 当前 shell：`export BUILD_PROXY_URL='...'` |
+| 项       | 说明                                                                                                                                       |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 开关     | `.env` 中 `BUILD_PROXY_ENABLED=true\|false`                                                                                                |
+| 类型偏好 | `BUILD_PROXY_TYPE`（如 `socks5h`）；空则回落 `PROXY_SCHEME`                                                                                |
+| 凭据真源 | 系统环境：`PROXY_SCHEME` `PROXY_HOST` `PROXY_PORT` `[PROXY_USER]` `[PROXY_PASS]`                                                           |
+| URL      | **禁止**写入 `.env`；仅当开关开启时由 `include/shell/proxy.sh`（及 `docker_manager` / `podman_manager` / `acme_renew_domain_cert.sh`）拼装 |
+| 临时覆盖 | 当前 shell：`export BUILD_PROXY_URL='...'`                                                                                                 |
 
 ### 密码与密钥
 
@@ -276,17 +276,23 @@ cp .env.example .env    # 然后编辑 .env
 
 在对应 `env/*.env`（或 `.env` 覆盖）修改系列号后重新 `build` / `up` 即可；**改版本号必须同步创建 `build/<组件>/<新版本>/`**。
 
-| 变量 | 文件 | 含义 |
-| --- | --- | --- |
-| `MYSQL_BUILD_VERSION` | `env/mysql.env` | MySQL 大系列（`8.0`/`8.4`/`9.7`） |
-| `REDIS_BUILD_VERSION` | `env/redis.env` | Redis 大系列 |
-| `VALKEY_BUILD_VERSION` | `env/redis.env` | Valkey 大系列 |
-| `ELK_BUILD_VERSION` | `env/elk.env` | ELK 大系列（路径 `build/elk/<系列>/`） |
-| `MONGO_BUILD_VERSION` | `env/mongodb.env` | Mongo 系列 |
-| `CLICKHOUSE_BUILD_VERSION` | `env/clickhouse.env` | ClickHouse 系列 |
-| `PG_MAJOR` / `PGVECTOR_PG_MAJOR` | `postgres.env` / `pgvector.env` | PG 主版本 |
+| 变量                             | 文件                            | 含义                                   |
+| -------------------------------- | ------------------------------- | -------------------------------------- |
+| `MYSQL_BUILD_VERSION`            | `env/mysql.env`                 | MySQL 大系列（`8.0`/`8.4`/`9.7`）      |
+| `REDIS_BUILD_VERSION`            | `env/redis.env`                 | Redis 大系列                           |
+| `VALKEY_BUILD_VERSION`           | `env/redis.env`                 | Valkey 大系列                          |
+| `ELK_BUILD_VERSION`              | `env/elk.env`                   | ELK 大系列（路径 `build/elk/<系列>/`） |
+| `MONGO_BUILD_VERSION`            | `env/mongodb.env`               | Mongo 系列                             |
+| `CLICKHOUSE_BUILD_VERSION`       | `env/clickhouse.env`            | ClickHouse 系列                        |
+| `PG_MAJOR` / `PGVECTOR_PG_MAJOR` | `postgres.env` / `pgvector.env` | PG 主版本                              |
 
 解析与下载逻辑集中在 `include/shell/version_resolve.sh`、`download_dependencies.sh`。
+
+上游版本按目标服务联网解析（作用域定义在 `include/shell/env_scope.sh`）：
+
+- `./build.sh valkey` 只解析 Valkey；`all` 或多服务时按涉及的组件解析；同一次运行内（含 `download_dependencies.sh`、`--auto-up` 调起的 `up.sh`）复用结果，不重复联网。
+- `up.sh` 全部走 `--no-build`，不解析版本；缺镜像时调起的 `build.sh` 会自行解析。
+- `env/*.env` 在 `build.sh` / `up.sh` 中仍全量加载（Compose 对整个工程插值，缺变量会报 `invalid spec`）；单独运行 `download_dependencies.sh <服务>` 时只加载该服务所需的 env 文件与根目录 `.env`/`.env.local`。
 
 ---
 
@@ -294,11 +300,11 @@ cp .env.example .env    # 然后编辑 .env
 
 ### MySQL 配置档（三档互斥）
 
-| 宿主机 | `ENVIRONMENT` | 实际加载 |
-| --- | --- | --- |
-| WSL | **任意**（覆盖判定） | `mysql-wsl.cnf`（忽略 `ENVIRONMENT`） |
-| 非 WSL | `dev` / `development` / 未设 | `mysql-dev.cnf` |
-| 非 WSL | `prod` / `production` | `mysql-prod.cnf` |
+| 宿主机 | `ENVIRONMENT`                | 实际加载                              |
+| ------ | ---------------------------- | ------------------------------------- |
+| WSL    | **任意**（覆盖判定）         | `mysql-wsl.cnf`（忽略 `ENVIRONMENT`） |
+| 非 WSL | `dev` / `development` / 未设 | `mysql-dev.cnf`                       |
+| 非 WSL | `prod` / `production`        | `mysql-prod.cnf`                      |
 
 WSL 档为减轻 WSL2 I/O 延迟放宽了部分安全项，**勿用于生产数据**。版本漂移与运行时校验：
 
@@ -348,15 +354,15 @@ bash scripts/check-mysql-runtime-cnf.sh            # 运行态只读自检（需
 
 ## 故障排查
 
-| 现象 | 方向 |
-| --- | --- |
-| 端口占用 | 改 `env/*.env` 对应端口变量后 `./up.sh <svc> restart` |
-| 构建拉包失败 | 检查 `BUILD_PROXY_ENABLED` 与系统 `PROXY_*`；或设 `CHANGE_SOURCE=true` |
-| 网络找不到 | `docker network inspect hg_dnmpr_network`；由 `up.sh` 预建，名称不是 `hg_dnmpr_default` |
-| MySQL 像「生产档」却在 WSL | 预期：WSL 固定 `mysql-wsl.cnf`；生产请在非 WSL 主机部署 |
-| Elasticsearch unhealthy / `node.lock` | 检查 data bind 目录属主是否为 `1000:0` |
-| 代理进了业务容器 | 确认 `container-strip-host-proxy.env` 在 env_file 末尾 |
-| Syncer 起不来 | 确认 `rabbitmq` / `canal-server` / `elasticsearch` 已就绪（`up.sh syncer` 会自动检测依赖） |
+| 现象                                  | 方向                                                                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------------ |
+| 端口占用                              | 改 `env/*.env` 对应端口变量后 `./up.sh <svc> restart`                                      |
+| 构建拉包失败                          | 检查 `BUILD_PROXY_ENABLED` 与系统 `PROXY_*`；或设 `CHANGE_SOURCE=true`                     |
+| 网络找不到                            | `docker network inspect hg_dnmpr_network`；由 `up.sh` 预建，名称不是 `hg_dnmpr_default`    |
+| MySQL 像「生产档」却在 WSL            | 预期：WSL 固定 `mysql-wsl.cnf`；生产请在非 WSL 主机部署                                    |
+| Elasticsearch unhealthy / `node.lock` | 检查 data bind 目录属主是否为 `1000:0`                                                     |
+| 代理进了业务容器                      | 确认 `container-strip-host-proxy.env` 在 env_file 末尾                                     |
+| Syncer 起不来                         | 确认 `rabbitmq` / `canal-server` / `elasticsearch` 已就绪（`up.sh syncer` 会自动检测依赖） |
 
 ```bash
 ./up.sh <服务> logs
@@ -369,13 +375,13 @@ docker compose --env-file .env.runtime -f compose/main.yaml config
 
 ## 文档索引
 
-| 文档 | 内容 |
-| --- | --- |
-| [QUICK_START.md](QUICK_START.md) | 快速启动、常用命令、WSL 优化、备份 |
-| [AGENTS.md](AGENTS.md) | Agent / 协作核心规则（动手前必读） |
-| [docs/AGENTS-MYSQL.md](docs/AGENTS-MYSQL.md) | MySQL 版本与 cnf 核验 |
-| [docs/monitoring.md](docs/monitoring.md) | 监控栈专题 |
-| [.env.example](.env.example) | 本地敏感配置模板 |
+| 文档                                         | 内容                               |
+| -------------------------------------------- | ---------------------------------- |
+| [QUICK_START.md](QUICK_START.md)             | 快速启动、常用命令、WSL 优化、备份 |
+| [AGENTS.md](AGENTS.md)                       | Agent / 协作核心规则（动手前必读） |
+| [docs/AGENTS-MYSQL.md](docs/AGENTS-MYSQL.md) | MySQL 版本与 cnf 核验              |
+| [docs/monitoring.md](docs/monitoring.md)     | 监控栈专题                         |
+| [.env.example](.env.example)                 | 本地敏感配置模板                   |
 
 ---
 

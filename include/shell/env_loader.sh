@@ -138,9 +138,10 @@ load_environment_variables() {
     # 此处仅为运行时 shell 兼容层；如未配置 DATA_PATH_HOST 则保留空值，由调用方自行处理。
     _derive_legacy_data_paths
 
-    # MySQL：按 MYSQL_BUILD_VERSION 解析通道最新版 → MYSQL_VER
-    if declare -F derive_mysql_build_ver >/dev/null 2>&1; then
-        derive_mysql_build_ver
+    # 上游版本（MYSQL_VER / PG_VERSION / *_VERSION / ELK_VERSION）只作 compose 构建参数；
+    # up.sh 全部走 --no-build，缺镜像时调用的 build.sh 会自行解析，故此处不联网解析。
+    if declare -F env_scope_skip_versions >/dev/null 2>&1; then
+        env_scope_skip_versions "up.sh 使用 --no-build"
     fi
 
     # MySQL：按 MYSQL_BUILD_VERSION 派生 MYSQL_CONF_FILE / MYSQL_ENV_CONFIG_FILE
@@ -148,21 +149,6 @@ load_environment_variables() {
         derive_mysql_conf_paths
     fi
 
-    # PostgreSQL：按 PG_MAJOR 解析 PGDG 通道最新版 → PG_VERSION / PG_SOURCE_VERSION
-    if declare -F derive_pg_build_ver >/dev/null 2>&1; then
-        derive_pg_build_ver
-    fi
-
-    # Mongo / Redis / Valkey：按 *_BUILD_VERSION 解析通道最新版
-    if declare -F derive_mongo_build_ver >/dev/null 2>&1; then
-        derive_mongo_build_ver
-    fi
-    if declare -F derive_redis_build_ver >/dev/null 2>&1; then
-        derive_redis_build_ver
-    fi
-    if declare -F derive_valkey_build_ver >/dev/null 2>&1; then
-        derive_valkey_build_ver
-    fi
     if declare -F derive_redis_conf_paths >/dev/null 2>&1; then
         derive_redis_conf_paths
     fi
@@ -172,10 +158,7 @@ load_environment_variables() {
         derive_php_ini_overlay_paths
     fi
 
-    # ELK：按 ELK_BUILD_VERSION 解析通道最新版 → ELK_VERSION，并派生配置路径
-    if declare -F derive_elk_build_ver >/dev/null 2>&1; then
-        derive_elk_build_ver
-    fi
+    # ELK：按 ELK_BUILD_VERSION 派生配置路径
     if declare -F derive_elk_conf_paths >/dev/null 2>&1; then
         derive_elk_conf_paths
     fi

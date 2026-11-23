@@ -8,13 +8,13 @@
 #   latest                    — 忽略钉选，安装通道 Candidate
 #
 # 环境变量：
-#   PG_MAJOR        主版本，如 18
-#   PG_VERSION      完整 apt 版本，如 18.4-1.pgdg12+1；空 / latest 视为不钉选
+#   PG_MAJOR        主版本，如 19
+#   PG_VERSION      完整 apt 版本，如 19.0-1.pgdg12+1；空 / latest 视为不钉选
 #   PG_PIN_POLICY   prefer | exact | latest
 # =============================================================================
 set -eu
 
-PG_MAJOR="${PG_MAJOR:-18}"
+PG_MAJOR="${PG_MAJOR:-19}"
 PG_PIN_POLICY="${PG_PIN_POLICY:-latest}"
 PG_VERSION="${PG_VERSION:-}"
 

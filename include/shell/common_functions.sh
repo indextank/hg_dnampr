@@ -22,6 +22,9 @@ if [[ -f "$_COMMON_FUNCTIONS_PROJECT_DIR/include/shell/version_resolve.sh" ]]; t
     source "$_COMMON_FUNCTIONS_PROJECT_DIR/include/shell/version_resolve.sh"
 fi
 
+# ---- 加载服务作用域（env 文件清单、按服务解析版本、版本缓存） ----
+source "$_COMMON_FUNCTIONS_PROJECT_DIR/include/shell/env_scope.sh"
+
 # ---- 加载容器运行时抽象层 ----
 if [[ -f "$_COMMON_FUNCTIONS_PROJECT_DIR/include/shell/container_runtime.sh" ]]; then
     source "$_COMMON_FUNCTIONS_PROJECT_DIR/include/shell/container_runtime.sh"
@@ -99,18 +102,22 @@ _get_env_file_value() {
 # 安全加载 env 文件。
 # - 支持空值覆盖：根目录 .env 可以将分层配置中的同名变量置空。
 # - 不 source 文件：避免密码、代理 URL 中的特殊字符被 shell 执行或截断。
+# - 纯 Bash 参数展开解析，不为每行 fork sed（WSL /mnt 下全量加载可节省数秒）。
 load_env_file_exports() {
     local file_path="$1"
+    local _env_line _env_key _env_val
 
     [[ -f "$file_path" ]] || return 0
     while IFS= read -r _env_line; do
-        local _env_key _env_val
         _env_key="${_env_line%%=*}"
         _env_val="${_env_line#*=}"
-        _env_key="$(echo "$_env_key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        _env_key="${_env_key#"${_env_key%%[![:space:]]*}"}"
+        _env_key="${_env_key%"${_env_key##*[![:space:]]}"}"
         [[ "$_env_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
 
-        _env_val="$(echo "$_env_val" | sed 's/[[:space:]]*#.*$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        _env_val="${_env_val%%#*}"
+        _env_val="${_env_val#"${_env_val%%[![:space:]]*}"}"
+        _env_val="${_env_val%"${_env_val##*[![:space:]]}"}"
         if [[ "${_env_val}" == '"'*'"' ]]; then
             _env_val="${_env_val:1:${#_env_val}-2}"
         elif [[ "${_env_val}" == "'"*"'" ]]; then
@@ -118,7 +125,6 @@ load_env_file_exports() {
         fi
         export "${_env_key}=${_env_val}"
     done < <(grep -E '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=' "$file_path" 2>/dev/null || true)
-    unset _env_line
 }
 
 # 生成合并的 compose env 文件（默认 build/.env.compose）。
@@ -131,25 +137,12 @@ write_compose_env_file() {
     local _project_dir="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
     local _env_dir="${ENV_DIR:-$_project_dir/env}"
     local _merged_file="$_project_dir/build/.env.compose"
-    local _order=(
-        "$_env_dir/base.env"
-        "$_env_dir/web.env"
-        "$_env_dir/php.env"
-        "$_env_dir/mysql.env"
-        "$_env_dir/postgres.env"
-        "$_env_dir/mongodb.env"
-        "$_env_dir/redis.env"
-        "$_env_dir/timescaledb.env"
-        "$_env_dir/pgvector.env"
-        "$_env_dir/clickhouse.env"
-        "$_env_dir/elk.env"
-        "$_env_dir/apps.env"
-        "$_env_dir/rabbitmq.env"
-        "$_env_dir/canal.env"
-        "$_env_dir/syncer.env"
-        "$_project_dir/.env"
-        "$_project_dir/.env.local"
-    )
+    local _name
+    local -a _order=()
+    for _name in "${HG_ENV_LAYER_FILES[@]}"; do
+        _order+=("$_env_dir/$_name")
+    done
+    _order+=("$_project_dir/.env" "$_project_dir/.env.local")
     mkdir -p "$(dirname "$_merged_file")" 2>/dev/null || true
     {
         echo "# 自动生成（write_compose_env_file），请勿手工编辑；每次加载配置时重新生成"
@@ -581,27 +574,19 @@ cleanup_logs() {
 }
 
 # 分层配置文件读取函数
+# 用途：加载 env/ 分层配置与根目录 .env/.env.local，派生配置路径，并只为目标服务联网解析上游版本
+# 参数：目标服务短名...（为空或含 all 时全量解析版本）
+# 说明：env 文件仍全量加载——compose 会对整个工程文件插值，缺变量会导致 invalid spec；
+#       耗时大头是版本联网解析，按服务裁剪的是这一步。
 load_config_files() {
     local config_dir="${ENV_DIR:-$PROJECT_DIR/env}"
-    local config_files=(
-        "$config_dir/base.env"        # 基础配置
-        "$config_dir/web.env"         # Web服务配置
-        "$config_dir/php.env"         # PHP配置
-        "$config_dir/mysql.env"       # MySQL配置
-        "$config_dir/postgres.env"    # PostgreSQL配置
-        "$config_dir/mongodb.env"     # MongoDB配置
-        "$config_dir/redis.env"       # Redis/Valkey配置
-        "$config_dir/timescaledb.env" # TimescaleDB配置
-        "$config_dir/pgvector.env"    # pgvector配置
-        "$config_dir/clickhouse.env"  # ClickHouse配置
-        "$config_dir/elk.env"         # ELK通用配置
-        "$config_dir/apps.env"        # 应用配置
-        "$config_dir/rabbitmq.env"    # RabbitMQ配置
-        "$config_dir/canal.env"       # Canal配置
-        "$config_dir/syncer.env"      # Syncer配置
-        "$PROJECT_DIR/.env"           # 根目录敏感配置，覆盖所有分层配置
-        "$PROJECT_DIR/.env.local"     # 本地临时覆盖
-    )
+    local _name
+    local -a config_files=()
+    for _name in "${HG_ENV_LAYER_FILES[@]}"; do
+        config_files+=("$config_dir/$_name")
+    done
+    # 根目录敏感配置与本地临时覆盖，最后加载以覆盖所有分层配置
+    config_files+=("$PROJECT_DIR/.env" "$PROJECT_DIR/.env.local")
 
     log "开始加载分层配置文件..."
 
@@ -634,39 +619,34 @@ load_config_files() {
     done
 
     success "分层配置文件加载完成"
+    # 子脚本（download_dependencies.sh）据此直接继承本进程环境，不再重读 env/*.env：
+    # 重读会把根目录 .env 的覆盖值改回分层默认值。
+    export HG_ENV_LOADED=1
 
     # 同步生成 compose 插值用合并 env 文件（供 sudo 场景下 --env-file 读取）
     write_compose_env_file || true
 
-    # MySQL：按 MYSQL_BUILD_VERSION 解析通道最新版 → MYSQL_VER
-    derive_mysql_build_ver
-
-    # MySQL：按 MYSQL_BUILD_VERSION 派生配置路径（仅空值填充，不覆盖显式设置）
+    # 配置路径派生均为本地计算（仅空值填充，不覆盖显式设置），始终执行
     derive_mysql_conf_paths
-
-    # PostgreSQL：按 PG_MAJOR 解析 PGDG 通道最新版 → PG_VERSION / PG_SOURCE_VERSION
-    derive_pg_build_ver
-
-    # Mongo / Redis / Valkey：按 *_BUILD_VERSION 解析通道最新版
-    derive_mongo_build_ver
-    derive_redis_build_ver
-    derive_valkey_build_ver
     derive_redis_conf_paths
-
     # PHP：hardening.ini（版本优先 / common 兜底）+ 统一 opcache.ini
     derive_php_ini_overlay_paths
-
-    # ELK：按 ELK_BUILD_VERSION 解析通道最新版 → ELK_VERSION，并派生配置路径
-    derive_elk_build_ver
     derive_elk_conf_paths
+
+    # 上游版本需联网解析：只解析目标服务涉及的组件
+    env_scope_resolve_versions "$@"
 }
 
 # 按 MYSQL_BUILD_VERSION（如 8.0 / 8.4 / 9.7）自动解析该系列 apt 通道最新上游版本并 export MYSQL_VER。
-# 每次调用都重新解析（保证拿到通道最新）；仅 MYSQL_VER_OVERRIDE 可强制钉选。
+# 每次运行解析一次（保证拿到通道最新），同一运行内及子进程复用结果；仅 MYSQL_VER_OVERRIDE 可强制钉选。
 # 回退：repo.mysql.com Packages → 本地 src/mysql tar.gz。
 derive_mysql_build_ver() {
     local series="${MYSQL_BUILD_VERSION:-8.4}"
     local resolved=""
+
+    if env_scope_version_cached MYSQL "$series" MYSQL_VER; then
+        return 0
+    fi
 
     if [[ -n "${MYSQL_VER_OVERRIDE:-}" ]]; then
         resolved="${MYSQL_VER_OVERRIDE}"
@@ -684,6 +664,7 @@ derive_mysql_build_ver() {
     export MYSQL_VER="${resolved:-}"
     export MYSQL_PIN_POLICY="${MYSQL_PIN_POLICY:-latest}"
     if [[ -n "${MYSQL_VER}" ]]; then
+        env_scope_mark_version MYSQL "$series"
         info "MySQL ${series} → MYSQL_VER=${MYSQL_VER} (PIN=${MYSQL_PIN_POLICY})"
     else
         warn "MySQL ${series}：未能解析具体版本，构建将安装 apt Candidate（PIN=latest）"
@@ -693,11 +674,15 @@ derive_mysql_build_ver() {
 # 按 PG_MAJOR 自动解析 PGDG 通道最新 apt 版本并 export：
 #   PG_VERSION        — 完整 apt 版本（如 18.6-1.pgdg12+2），供 bookworm Dockerfile
 #   PG_SOURCE_VERSION — 上游源码版本（如 18.6），供 src/postgres 缓存与 alpine 构建
-# 每次调用都重新解析；仅 PG_VERSION_OVERRIDE 可强制钉选。
+# 每次运行解析一次，同一运行内及子进程复用结果；仅 PG_VERSION_OVERRIDE 可强制钉选。
 derive_pg_build_ver() {
-    local major="${PG_MAJOR:-18}"
+    local major="${PG_MAJOR:-19}"
     local apt_ver=""
     local src_ver=""
+
+    if env_scope_version_cached PG "$major" PG_SOURCE_VERSION; then
+        return 0
+    fi
 
     if [[ -n "${PG_VERSION_OVERRIDE:-}" ]]; then
         apt_ver="${PG_VERSION_OVERRIDE}"
@@ -718,6 +703,9 @@ derive_pg_build_ver() {
     export PG_VERSION="${apt_ver:-}"
     export PG_SOURCE_VERSION="${src_ver:-}"
     export PG_PIN_POLICY="${PG_PIN_POLICY:-latest}"
+    if [[ -n "${PG_SOURCE_VERSION}" ]]; then
+        env_scope_mark_version PG "$major"
+    fi
     if [[ -n "${PG_VERSION}" ]]; then
         info "PostgreSQL ${major} → PG_VERSION=${PG_VERSION} PG_SOURCE_VERSION=${PG_SOURCE_VERSION:-?} (PIN=${PG_PIN_POLICY})"
     else
@@ -726,10 +714,14 @@ derive_pg_build_ver() {
 }
 
 # 按 MONGO_BUILD_VERSION 解析 apt 通道最新版 → MONGO_VERSION
-# 每次重新解析；仅 MONGO_VERSION_OVERRIDE 可强制钉选。
+# 每次运行解析一次，同一运行内及子进程复用结果；仅 MONGO_VERSION_OVERRIDE 可强制钉选。
 derive_mongo_build_ver() {
     local series="${MONGO_BUILD_VERSION:-8.2}"
     local resolved=""
+
+    if env_scope_version_cached MONGO "$series" MONGO_VERSION; then
+        return 0
+    fi
 
     if [[ -n "${MONGO_VERSION_OVERRIDE:-}" ]]; then
         resolved="${MONGO_VERSION_OVERRIDE}"
@@ -746,6 +738,7 @@ derive_mongo_build_ver() {
 
     export MONGO_VERSION="${resolved:-}"
     if [[ -n "${MONGO_VERSION}" ]]; then
+        env_scope_mark_version MONGO "$series"
         info "MongoDB ${series} → MONGO_VERSION=${MONGO_VERSION}"
     else
         warn "MongoDB ${series}：未能解析具体版本，构建将安装 apt Candidate（空钉选）"
@@ -756,6 +749,10 @@ derive_mongo_build_ver() {
 derive_redis_build_ver() {
     local series="${REDIS_BUILD_VERSION:-8.10}"
     local resolved=""
+
+    if env_scope_version_cached REDIS "$series" REDIS_VERSION; then
+        return 0
+    fi
 
     if [[ -n "${REDIS_VERSION_OVERRIDE:-}" ]]; then
         resolved="${REDIS_VERSION_OVERRIDE}"
@@ -772,6 +769,7 @@ derive_redis_build_ver() {
 
     export REDIS_VERSION="${resolved:-}"
     if [[ -n "${REDIS_VERSION}" ]]; then
+        env_scope_mark_version REDIS "$series"
         info "Redis ${series} → REDIS_VERSION=${REDIS_VERSION}"
     else
         warn "Redis ${series}：未能解析具体版本，源码构建可能失败"
@@ -782,6 +780,10 @@ derive_redis_build_ver() {
 derive_valkey_build_ver() {
     local series="${VALKEY_BUILD_VERSION:-8.1}"
     local resolved=""
+
+    if env_scope_version_cached VALKEY "$series" VALKEY_VERSION; then
+        return 0
+    fi
 
     if [[ -n "${VALKEY_VERSION_OVERRIDE:-}" ]]; then
         resolved="${VALKEY_VERSION_OVERRIDE}"
@@ -798,6 +800,7 @@ derive_valkey_build_ver() {
 
     export VALKEY_VERSION="${resolved:-}"
     if [[ -n "${VALKEY_VERSION}" ]]; then
+        env_scope_mark_version VALKEY "$series"
         info "Valkey ${series} → VALKEY_VERSION=${VALKEY_VERSION}"
     else
         warn "Valkey ${series}：未能解析具体版本，源码构建可能失败"
@@ -869,10 +872,15 @@ derive_php_ini_overlay_paths() {
 }
 
 # 按 ELK_BUILD_VERSION 解析通道最新版 → ELK_VERSION；TINI 默认 v0.19.0（官方仍在用）
-# 每次重新解析；仅 ELK_VERSION_OVERRIDE 可强制钉选。
+# 每次运行解析一次，同一运行内及子进程复用结果；仅 ELK_VERSION_OVERRIDE 可强制钉选。
 derive_elk_build_ver() {
     local series="${ELK_BUILD_VERSION:-9.5}"
     local resolved=""
+
+    if env_scope_version_cached ELK "$series" ELK_VERSION; then
+        export TINI_VERSION="${TINI_VERSION:-v0.19.0}"
+        return 0
+    fi
 
     if [[ -n "${ELK_VERSION_OVERRIDE:-}" ]]; then
         resolved="${ELK_VERSION_OVERRIDE}"
@@ -891,6 +899,7 @@ derive_elk_build_ver() {
     # 不强制要求 env 配置 TINI_VERSION；与官方 dockerfiles 对齐默认 v0.19.0
     export TINI_VERSION="${TINI_VERSION:-v0.19.0}"
     if [[ -n "${ELK_VERSION}" ]]; then
+        env_scope_mark_version ELK "$series"
         info "ELK ${series} → ELK_VERSION=${ELK_VERSION} (TINI=${TINI_VERSION})"
     else
         warn "ELK ${series}：未能解析具体版本，构建/下载可能失败"

@@ -14,6 +14,8 @@
 *.env.bak
 # .env.runtime 由 up.sh 运行时合并生成（含 .env 的明文密钥），严禁入库
 .env.runtime
+# build/.env.compose 由 write_compose_env_file 合并生成（含 .env 的明文密钥），严禁入库
+build/.env.compose
 # gost-client-forwarder.sh 的本机私有凭据
 *.local.env
 .cursor

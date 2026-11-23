@@ -78,9 +78,9 @@ resolve_mysql_ver_from_local() {
 }
 
 # PGDG Packages：postgresql-$major 的 Version（完整 apt 版本）
-# 用法: resolve_postgres_latest_apt_ver [18]
+# 用法: resolve_postgres_latest_apt_ver [19]
 resolve_postgres_latest_apt_ver() {
-    local major="${1:-${PG_MAJOR:-18}}"
+    local major="${1:-${PG_MAJOR:-19}}"
     local urls=(
         "https://apt.postgresql.org/pub/repos/apt/dists/bookworm-pgdg/main/binary-amd64/Packages"
         "https://mirrors.aliyun.com/postgresql/repos/apt/dists/bookworm-pgdg/main/binary-amd64/Packages"
@@ -107,7 +107,7 @@ postgres_upstream_ver() {
 
 # 从本地 src/postgres 缓存推断主版本下最新源码包上游版本
 resolve_postgres_ver_from_local() {
-    local major="${1:-${PG_MAJOR:-18}}"
+    local major="${1:-${PG_MAJOR:-19}}"
     local dir="${2:-${_COMMON_FUNCTIONS_PROJECT_DIR:-.}/src/postgres}"
     local f
     f="$(ls -1 "$dir"/postgresql-"${major}".*.tar.gz 2>/dev/null | sed 's/.*\///' | sort -V | tail -1 || true)"

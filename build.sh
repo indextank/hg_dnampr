@@ -909,8 +909,8 @@ fi
 # 切换到项目目录
 cd "$PROJECT_DIR"
 
-# 加载分层配置文件
-load_config_files
+# 加载分层配置文件；上游版本只解析目标服务涉及的组件
+load_config_files "${SERVICES[@]}"
 
 # 统一项目环境：构建、ELK环境配置、monitoring端口绑定均读取 env/base.env。
 export_monitoring_publish_host_from_base_env "$PROJECT_DIR"

@@ -44,15 +44,15 @@ trap on_error ERR
 
 usage() {
   cat <<'EOF'
-gost-manager.sh - Gost 一键安装/升级与管理脚本（Bash 4+）
+gost-server-manager.sh - Gost 一键安装/升级与管理脚本（Bash 4+）
 
 用法:
-  ./gost-manager.sh                显示交互菜单（默认）
-  ./gost-manager.sh --install      交互安装/升级
-  ./gost-manager.sh --purge        完全卸载并清理 gost
-  ./gost-manager.sh --reload-config  仅重写 /etc/gost/config.yaml 并重启 gost（需 root）
-  ./gost-manager.sh --status       显示 gost 服务状态（交互主菜单选 5 亦同）
-  ./gost-manager.sh -h|--help      显示帮助
+  ./gost-server-manager.sh                显示交互菜单（默认）
+  ./gost-server-manager.sh --install      交互安装/升级
+  ./gost-server-manager.sh --purge        完全卸载并清理 gost
+  ./gost-server-manager.sh --reload-config  仅重写 /etc/gost/config.yaml 并重启 gost（需 root）
+  ./gost-server-manager.sh --status       显示 gost 服务状态（交互主菜单选 5 亦同）
+  ./gost-server-manager.sh -h|--help      显示帮助
 
 功能:
   1) 自动检测系统与 CPU 架构，下载官方最新 release 二进制

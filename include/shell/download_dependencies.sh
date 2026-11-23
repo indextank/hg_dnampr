@@ -21,36 +21,26 @@ source "$SCRIPT_DIR/common_functions.sh"
 RABBITMQ_CANAL_HINT_SHOWN=false
 
 # 加载环境变量
+# 用途：由 build.sh 调起时（HG_ENV_LOADED=1）直接继承父进程已合并 .env 覆盖的环境；
+#       独立运行时只加载目标服务需要的 env/*.env，再以根目录 .env/.env.local 覆盖。
+# 参数：目标服务名...
 load_env_files() {
     local config_dir="${ENV_DIR:-$PROJECT_DIR/env}"
+    local env_file joined
+    local -a scoped=()
 
-    # 加载所有环境配置文件
-    for env_file in "$config_dir"/*.env; do
-        if [[ -f "$env_file" ]]; then
-            log "加载配置文件: $(basename "$env_file")"
-            # 使用while循环逐行读取，跳过注释和空行
-            while IFS= read -r line; do
-                # 去掉行首尾空格
-                line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [[ "${HG_ENV_LOADED:-}" == "1" ]]; then
+        return 0
+    fi
 
-                # 跳过注释行和空行
-                [[ "$line" =~ ^# ]] && continue
-                [[ -z "$line" ]] && continue
-
-                # 检查是否包含等号且不是注释行
-                if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
-                    # 提取键和值
-                    key=$(echo "$line" | cut -d'=' -f1)
-                    value=$(echo "$line" | cut -d'=' -f2- | sed 's/[[:space:]]*#.*$//')
-
-                    # 导出变量
-                    if [[ -n "$key" && -n "$value" ]]; then
-                        export "$key"="$value"
-                    fi
-                fi
-            done < "$env_file"
-        fi
+    mapfile -t scoped < <(env_scope_env_files "$@")
+    for env_file in "${scoped[@]}"; do
+        load_env_file_exports "$config_dir/$env_file"
     done
+    load_env_file_exports "$PROJECT_DIR/.env"
+    load_env_file_exports "$PROJECT_DIR/.env.local"
+    printf -v joined '%s ' "${scoped[@]}"
+    log "按目标服务加载配置文件: ${joined}+ .env/.env.local"
 }
 
 # 创建目录函数
@@ -619,7 +609,7 @@ download_mongo_dependencies() {
 # PostgreSQL相关下载（按 PG_MAJOR 自动取 PGDG 通道最新版，同主版本只保留一份 tar.gz）
 download_postgres_dependencies() {
     local postgres_src_dir="$SRC_DIR/postgres"
-    local major="${PG_MAJOR:-18}"
+    local major="${PG_MAJOR:-19}"
 
     ensure_directory "$postgres_src_dir"
 
@@ -870,40 +860,20 @@ download_service_dependencies() {
 
 # 主函数
 main() {
-    log "开始下载依赖软件包..."
-
-    # 加载环境变量
-    load_env_files
-
-    # 按大版本开关解析通道最新版
-    if declare -F derive_mysql_build_ver >/dev/null 2>&1; then
-        derive_mysql_build_ver
-    fi
-    if declare -F derive_pg_build_ver >/dev/null 2>&1; then
-        derive_pg_build_ver
-    fi
-    if declare -F derive_mongo_build_ver >/dev/null 2>&1; then
-        derive_mongo_build_ver
-    fi
-    if declare -F derive_redis_build_ver >/dev/null 2>&1; then
-        derive_redis_build_ver
-    fi
-    if declare -F derive_valkey_build_ver >/dev/null 2>&1; then
-        derive_valkey_build_ver
-    fi
-    if declare -F derive_redis_conf_paths >/dev/null 2>&1; then
-        derive_redis_conf_paths
-    fi
-
-    # 确保src目录存在
-    ensure_directory "$SRC_DIR"
-
     # 如果没有指定服务，显示帮助信息
     if [[ $# -eq 0 ]]; then
         echo "使用方法: $0 [服务名...]"
         echo "支持的服务: php85, php84, php83, php82, php81, php80, php74, nginx, tengine, redis, valkey, mysql, mongo, postgres, rabbitmq, canal, syncer, elk, sgr, spug, gitea, rap2-dolores, rap2-delos, openssl, all"
         exit 1
     fi
+
+    log "开始下载依赖软件包..."
+
+    # 加载环境变量；上游版本由各 download_*_dependencies 按需解析（复用 build.sh 已解析结果）
+    load_env_files "$@"
+
+    # 确保src目录存在
+    ensure_directory "$SRC_DIR"
 
     # 下载指定服务的依赖
     for service in "$@"; do

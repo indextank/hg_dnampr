@@ -340,7 +340,7 @@ services:
         image: hg_dnmpr_postgres:latest
         build:
             context: ../..
-            dockerfile: build/postgres/${PG_MAJOR:-18}/${PG_VARIANT:-bookworm}/Dockerfile
+            dockerfile: build/postgres/${PG_MAJOR:-19}/${PG_VARIANT:-bookworm}/Dockerfile
             args:
                 # PG_VERSION 由 derive_pg_build_ver 按 PG_MAJOR 解析；空则装 apt Candidate
                 PG_VERSION: ${PG_VERSION:-}
