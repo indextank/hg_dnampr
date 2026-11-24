@@ -1,11 +1,14 @@
 #!/bin/sh
-set -e
+set -eu
 
-# Align runtime dirs with php.ini session.save_path / upload_tmp_dir.
-# Named volumes and fresh tmpfs mounts may otherwise be root-only.
-for _php_runtime_dir in /tmp/php_sessions /tmp/php_upload; do
-	mkdir -p "${_php_runtime_dir}"
-	chmod 1777 "${_php_runtime_dir}" || true
+# Runtime directories are pre-created in the image and provided as uid/gid
+# aware tmpfs mounts by Compose.  The entrypoint deliberately performs no
+# chown/chmod so the container can run with no capabilities as www-data.
+for _php_runtime_dir in /tmp/php_sessions /tmp/php_upload /tmp/apache2/run; do
+	if [ ! -d "${_php_runtime_dir}" ] || [ ! -w "${_php_runtime_dir}" ]; then
+		echo "ERROR: PHP runtime directory is not writable: ${_php_runtime_dir}" >&2
+		exit 1
+	fi
 done
 unset _php_runtime_dir
 

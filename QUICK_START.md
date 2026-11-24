@@ -65,6 +65,12 @@ docker-compose --version
 # 克隆项目
 git clone <repository-url>
 cd hg_dnmpr
+
+# 本机敏感配置（均已被 Git 忽略）
+cp .env.example .env
+cp php-runtime.local.env.example php-runtime.local.env
+# 编辑 .env：基础设施管理员凭据
+# 编辑 php-runtime.local.env：仅填写 PHP 应用所需的最小权限账号
 ```
 
 ### 2. 快速启动（推荐）
@@ -84,15 +90,16 @@ cd hg_dnmpr
 # 最常用的开发环境组合（使用PHP 8.4稳定版）
 ./build.sh nginx php84 mysql redis --auto-up
 
-# 或使用PHP 8.5最新版本
-./build.sh nginx php85 mysql redis --auto-up
+# 或使用PHP 8.6最新版本
+./build.sh nginx php86 mysql redis --auto-up
 ```
 
 ## 🌐 默认访问地址
 
 | 服务    | 地址                      | 端口 | 说明           |
 | ------- | ------------------------- | ---- | -------------- |
-| PHP 8.5 | https://php85.default.com | 8085 | 最新PHP版本    |
+| PHP 8.6 | https://php86.default.com | 8086 | 最新PHP版本    |
+| PHP 8.5 | https://php85.default.com | 8085 | PHP 8.5        |
 | PHP 8.4 | https://php84.default.com | 8084 | PHP 8.4 稳定版 |
 | PHP 8.3 | https://php83.default.com | 8083 | PHP 8.3        |
 | PHP 8.2 | https://php82.default.com | 8082 | PHP 8.2        |
@@ -105,7 +112,7 @@ cd hg_dnmpr
 ```bash
 # Windows: C:\Windows\System32\drivers\etc\hosts
 # Linux/Mac: /etc/hosts
-127.0.0.1 php85.default.com php84.default.com php83.default.com php82.default.com php81.default.com php80.default.com php74.default.com
+127.0.0.1 php86.default.com php85.default.com php84.default.com php83.default.com php82.default.com php81.default.com php80.default.com php74.default.com
 ```
 
 ## 🛠️ 常用命令
@@ -511,7 +518,8 @@ ip addr show eth0 | grep inet
 
 | 版本    | 状态   | 推荐场景         | 扩展支持 |
 | ------- | ------ | ---------------- | -------- |
-| PHP 8.5 | 最新版 | 尝鲜、新特性开发 | 完整支持 |
+| PHP 8.6 | 最新版 | 尝鲜、新特性开发 | 仅 redis/mongodb（暂不含 Swoole/Xdebug/yaml/imagick） |
+| PHP 8.5 | 稳定版 | 新特性开发       | 完整支持 |
 | PHP 8.4 | 稳定版 | **生产环境推荐** | 完整支持 |
 | PHP 8.3 | 稳定版 | 生产环境         | 完整支持 |
 | PHP 8.2 | 稳定版 | 生产环境         | 完整支持 |
@@ -523,6 +531,7 @@ ip addr show eth0 | grep inet
 
 默认端口配置（可在 `php.env` 中修改）：
 
+- PHP 8.6: 8086
 - PHP 8.5: 8085
 - PHP 8.4: 8084
 - PHP 8.3: 8083

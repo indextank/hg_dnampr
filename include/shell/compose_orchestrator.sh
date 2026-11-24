@@ -1006,7 +1006,7 @@ _podman_healthcheck_fallback() {
 
     for _svc in "${_svcs[@]}"; do
         case "$_svc" in
-            php74_apache|php80_apache|php81_apache|php82_apache|php83_apache|php84_apache|php85_apache)
+            php74_apache|php80_apache|php81_apache|php82_apache|php83_apache|php84_apache|php85_apache|php86_apache)
                 info "等待 $_svc 健康就绪..."
                 while [[ $_waited -lt $_max_wait ]]; do
                     if cr_cmd inspect --format '{{.State.Health.Status}}' "$_svc" 2>/dev/null | grep -q "healthy"; then

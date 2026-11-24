@@ -1064,10 +1064,10 @@ restart_docker_containers() {
         rebuild_nginx_container
     elif [ "$restart_web" = true ]; then
         yellow "🔄 正在重启web服务 (nginx + php)..."
-        if "$SCRIPT_DIR/up.sh" nginx php74 php82 php84 restart; then
+        if "$SCRIPT_DIR/up.sh" nginx php74 php80 php81 php82 php83 php84 php85 php86 restart; then
             green "✅ web服务重启成功"
         else
-            red "❌ web服务重启失败，请手动执行: ./up.sh nginx php74 php82 php84 restart"
+            red "❌ web服务重启失败，请手动执行: ./up.sh nginx php74 php80 php81 php82 php83 php84 php85 php86 restart"
         fi
     fi
 }

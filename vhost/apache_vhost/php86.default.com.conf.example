@@ -1,0 +1,11 @@
+<VirtualHost *:88>
+    ServerName php86.default.com
+    DocumentRoot /var/www/html/default
+
+    <Directory /var/www/html/default>
+        Options FollowSymLinks
+        AllowOverride All
+        Require all granted
+        DirectoryIndex index.php index.html
+    </Directory>
+</VirtualHost>

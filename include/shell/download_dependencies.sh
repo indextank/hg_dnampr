@@ -774,7 +774,7 @@ download_service_dependencies() {
     local service="$1"
 
     case "$service" in
-        php85|php84|php83|php82|php81|php80|php74)
+        php86|php85|php84|php83|php82|php81|php80|php74)
             local version_var="PHP${service#php}_VERSION"
             local php_version="${!version_var:-}"
             if [[ -n "$php_version" ]]; then
@@ -822,6 +822,9 @@ download_service_dependencies() {
             info "开始下载所有服务的依赖..."
             download_openssl_dependencies
             # 下载所有 PHP 版本的依赖（只下载一次共享依赖）
+            if [[ -n "${PHP86_VERSION:-}" ]]; then
+                download_php_dependencies "${PHP86_VERSION}"
+            fi
             if [[ -n "${PHP85_VERSION:-}" ]]; then
                 download_php_dependencies "${PHP85_VERSION}"
             fi
@@ -863,7 +866,7 @@ main() {
     # 如果没有指定服务，显示帮助信息
     if [[ $# -eq 0 ]]; then
         echo "使用方法: $0 [服务名...]"
-        echo "支持的服务: php85, php84, php83, php82, php81, php80, php74, nginx, tengine, redis, valkey, mysql, mongo, postgres, rabbitmq, canal, syncer, elk, sgr, spug, gitea, rap2-dolores, rap2-delos, openssl, all"
+        echo "支持的服务: php86, php85, php84, php83, php82, php81, php80, php74, nginx, tengine, redis, valkey, mysql, mongo, postgres, rabbitmq, canal, syncer, elk, sgr, spug, gitea, rap2-dolores, rap2-delos, openssl, all"
         exit 1
     fi
 

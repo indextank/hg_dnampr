@@ -89,7 +89,7 @@ MYSQL_BIND_HOST_CLI_SET="false"
 while [[ $# -gt 0 ]]; do
     case $1 in
         # 服务名
-        php85|php84|php83|php82|php81|php80|php74|nginx|tengine|mysql|mysql_backup|redis|valkey|mongo|mongodb|postgres|postgresql|pgadmin|timescaledb|timescaledb_backup|pgvector|pgvector_backup|clickhouse|clickhouse_backup|elk|elasticsearch|kibana|logstash|sgr|spug|gitea|rap2-dolores|rap2-delos|rabbitmq|syncer|canal|canal-server|monitoring|prometheus|grafana|syncer-prometheus|syncer-grafana|all)
+        php86|php85|php84|php83|php82|php81|php80|php74|nginx|tengine|mysql|mysql_backup|redis|valkey|mongo|mongodb|postgres|postgresql|pgadmin|timescaledb|timescaledb_backup|pgvector|pgvector_backup|clickhouse|clickhouse_backup|elk|elasticsearch|kibana|logstash|sgr|spug|gitea|rap2-dolores|rap2-delos|rabbitmq|syncer|canal|canal-server|monitoring|prometheus|grafana|syncer-prometheus|syncer-grafana|all)
             SERVICES+=("$1")
             shift
             ;;
@@ -370,7 +370,7 @@ if [[ ${#_runtime_existing_env_sources[@]} -gt 0 ]]; then
         MYSQL_VER PG_VERSION MONGO_VERSION REDIS_VERSION VALKEY_VERSION \
         PHP_OPCACHE_INI_FILE \
         PHP74_HARDENING_INI_FILE PHP80_HARDENING_INI_FILE PHP81_HARDENING_INI_FILE \
-        PHP82_HARDENING_INI_FILE PHP83_HARDENING_INI_FILE PHP84_HARDENING_INI_FILE PHP85_HARDENING_INI_FILE
+        PHP82_HARDENING_INI_FILE PHP83_HARDENING_INI_FILE PHP84_HARDENING_INI_FILE PHP85_HARDENING_INI_FILE PHP86_HARDENING_INI_FILE
     do
         if [[ -v $_runtime_key ]]; then
             _runtime_val="${!_runtime_key}"
@@ -438,7 +438,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
             # ── 主栈：检查已构建镜像的服务 ──────────────────────────────────
             available_services=()
 
-            for service in php85_apache php84_apache php83_apache php82_apache php81_apache php80_apache php74_apache nginx tengine mysql mysql_backup redis valkey mongo postgres; do
+            for service in php86_apache php85_apache php84_apache php83_apache php82_apache php81_apache php80_apache php74_apache nginx tengine mysql mysql_backup redis valkey mongo postgres; do
                 if _cr_has_image "hg_dnmpr_${service}:latest"; then
                     available_services+=("$service")
                 fi

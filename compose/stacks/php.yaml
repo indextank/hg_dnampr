@@ -1,632 +1,299 @@
 version: '3.9'
 
-# ==========================================
-# PHP通用配置模板 (优化版)
-# ==========================================
-x-default-common: &default-common
-    restart: unless-stopped # 更稳定的重启策略
+# PHP 容器只接收非敏感项目默认值；应用账号和密钥放在被忽略的
+# php-runtime.local.env 中。required:false 允许未配置业务密钥时安全启动。
+x-php-runtime: &php-runtime
+    restart: unless-stopped
+    init: true
+    user: '33:33'
     env_file:
         - ${ENV_DIR:-../../env}/base.env
         - ${ENV_DIR:-../../env}/web.env
         - ${ENV_DIR:-../../env}/php.env
-        - ${ENV_DIR:-../../env}/mysql.env
-        - ${ENV_DIR:-../../env}/postgres.env
-        - ${ENV_DIR:-../../env}/mongodb.env
-        - ${ENV_DIR:-../../env}/redis.env
-        - ${ROOT_ENV_FILE:-../../.env}
+        - path: ${PHP_RUNTIME_ENV_FILE:-../../php-runtime.local.env}
+          required: false
         - ${ENV_DIR:-../../env}/container-strip-host-proxy.env
     environment:
-        # 覆盖 env_file 中的 APACHE_LOG_DIR，避免 host 端路径污染容器内 Apache 配置
-        APACHE_LOG_DIR: /etc/apache2/logs/apache
+        APACHE_LOG_DIR: /tmp/apache2/logs
+        APACHE_RUN_DIR: /tmp/apache2/run
+        APACHE_LOCK_DIR: /tmp/apache2/lock
+        APACHE_PID_FILE: /tmp/apache2/run/apache2.pid
     dns:
         - ${DNS_PRIMARY:-223.5.5.5}
         - ${DNS_SECONDARY:-119.29.29.29}
-    dns_opt:
-        - use-vc
-        - timeout:2
-        - attempts:3
-    # ICMP 需要 CAP_NET_RAW；部分环境会收紧默认能力，显式声明避免 ping 报 Operation not permitted
-    cap_add:
-        - NET_RAW
-    # 日志配置优化
-    logging:
-        driver: 'json-file'
-        options:
-            max-size: '${LOG_MAX_SIZE:-50m}'
-            max-file: '${LOG_MAX_FILE:-5}'
-            compress: 'true'
-
-    # 优化的健康检查配置
+    dns_opt: [use-vc, timeout:2, attempts:3]
     healthcheck:
-        test: ['CMD', 'pgrep', 'apache2']
-        # test: ["CMD", "curl", "--fail", "--max-time", "5", "http://localhost:88/"]
+        test: ['CMD', '/usr/local/bin/healthcheck.sh']
         interval: 30s
-        timeout: 15s # 增加超时时间
+        timeout: 10s
         retries: 3
-        start_period: 90s # 增加启动时间，考虑编译缓存加载
-
-    # 资源配置优化
+        start_period: 60s
+    stop_grace_period: 30s
+    tmpfs:
+        # 必须挂叶子目录：挂 /tmp/apache2 会遮住镜像内预建的 run/lock/logs。
+        - /tmp/apache2/run:uid=33,gid=33,mode=0750
+        - /tmp/apache2/lock:uid=33,gid=33,mode=0750
+        - /tmp/apache2/logs:uid=33,gid=33,mode=0750
+        - /tmp/php_sessions:uid=33,gid=33,mode=0700
+        - /tmp/php_upload:uid=33,gid=33,mode=0700
     deploy:
-        # 资源限制
         resources:
             limits:
-                cpus: ${PHP_LIMITS_CPU:-4} # 增加默认CPU限制
-                memory: ${PHP_LIMITS_MEMORY:-2G} # 增加默认内存限制
+                cpus: ${PHP_LIMITS_CPU:-4}
+                memory: ${PHP_LIMITS_MEMORY:-2G}
             reservations:
-                memory: ${PHP_RESERVATIONS_MEMORY:-1G} # 增加默认内存预留
+                memory: ${PHP_RESERVATIONS_MEMORY:-1G}
+    logging:
+        driver: json-file
+        options:
+            max-size: ${LOG_MAX_SIZE:-50m}
+            max-file: ${LOG_MAX_FILE:-5}
+            compress: 'true'
+    networks: [default, backend]
 
-    # 安全配置 (在开发环境中暂时禁用以避免配置冲突)
-    # security_opt:
-    #   - no-new-privileges:true
-
-    # 限制系统调用 (在主机网络模式下禁用，避免冲突)
-    # sysctls:
-    #   - net.core.somaxconn=1024
-    #   - net.ipv4.ip_local_port_range=10000 65000
-
-# PHP 镜像可选 nvm/Node 构建参数（变量来自 env/php.env；up.sh/build.sh 会导出）
-x-php-nvm-build-args: &php-nvm-build-args
+x-php-build-args: &php-build-args
+    CHANGE_SOURCE: ${CHANGE_SOURCE:-false}
+    FALLBACK_MIRROR: ${FALLBACK_MIRROR:-}
+    BUILD_PROXY_TYPE: ${BUILD_PROXY_TYPE:-none}
+    LIBWEBP_VERSION: ${LIBWEBP_VERSION}
+    LIBAVIF_VERSION: ${LIBAVIF_VERSION}
+    LIBAVIF_SHA256: ${LIBAVIF_SHA256}
+    XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
+    GRPC_EXT_VERSION: ${GRPC_EXT_VERSION}
+    REDIS_EXT_VERSION: ${REDIS_EXT_VERSION}
+    LIBRDKAFKA_VERSION: ${LIBRDKAFKA_VERSION}
+    RDKAFKA_EXT_VERSION: ${RDKAFKA_EXT_VERSION}
+    ZOOKEEPER_VERSION: ${ZOOKEEPER_VERSION}
+    ZOOKEEPER_EXT_VERSION: ${ZOOKEEPER_EXT_VERSION}
+    PROTOBUF_VERSION: ${PROTOBUF_VERSION}
+    PROTOBUF_EXT_VERSION: ${PROTOBUF_EXT_VERSION}
+    MONGODB_EXT_VERSION: ${MONGODB_EXT_VERSION}
+    IMAGICK_EXT_VERSION: ${IMAGICK_EXT_VERSION}
+    IMAGICK_VERSION: ${IMAGICK_VERSION}
+    IMAGICK_SOURCE_SHA256: ${IMAGICK_SOURCE_SHA256}
+    MEMCACHED_VERSION: ${MEMCACHED_VERSION}
+    CURL_VERSION: ${CURL_VERSION}
+    LIBSODIUM_VERSION: ${LIBSODIUM_VERSION}
+    LIBICONV_VERSION: ${LIBICONV_VERSION}
+    FREETYPE_VERSION: ${FREETYPE_VERSION}
+    YAML_EXT_VERSION: ${YAML_EXT_VERSION}
     PHP_IMAGE_INSTALL_NVM: ${PHP_IMAGE_INSTALL_NVM:-false}
-    PHP_IMAGE_NODE_VERSION: ${PHP_IMAGE_NODE_VERSION:-25.9.0}
+    PHP_IMAGE_NODE_VERSION: ${PHP_IMAGE_NODE_VERSION:-26.1.0}
     PHP_IMAGE_NVM_NODE_MIRROR: ${PHP_IMAGE_NVM_NODE_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/}
 
-# ==========================================
-# 存储卷定义
-# ==========================================
-volumes:
-    php_sessions:
-        driver: local
+x-php-build: &php-build
+    context: ../..
+    dockerfile: build/php/common/Dockerfile
+    shm_size: 1024m
 
 services:
-    ################  php85 #############################
+    php86_apache:
+        <<: *php-runtime
+        container_name: php86_apache
+        hostname: php86-apache
+        image: hg_dnmpr_php86_apache:latest
+        build:
+            <<: *php-build
+            args:
+                <<: *php-build-args
+                PHP_VERSION: ${PHP86_VERSION}
+                PHP_EXTENSIONS: ${PHP86_EXTENSIONS}
+                SWOOLE_EXT_VERSION: ''
+                REDIS_EXT_VERSION: ${PHP86_REDIS_EXT_VERSION}
+                OPENSSL_VERSION: ${OPENSSL_VERSION}
+        volumes:
+            - ${GLOBAL_WEB_PATH}:/var/www/html:ro,Z
+            - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
+            - ${PHP86_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
+            - ${PHP86_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
+            - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
+            - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
+        ports: ['${PHP86_PORT}:88']
+        labels:
+            - traefik.enable=true
+            - 'traefik.http.routers.php86.rule=Host(`${PHP86_SERVER_NAME}`)'
+            - traefik.http.services.php86.loadbalancer.server.port=88
+
     php85_apache:
-        <<: *default-common
+        <<: *php-runtime
         container_name: php85_apache
         hostname: php85-apache
         image: hg_dnmpr_php85_apache:latest
-
         build:
-            context: ../..
-            dockerfile: build/php/8.5/Dockerfile
-            network: host # 使用主机网络解决DNS问题
+            <<: *php-build
             args:
-                # 基础配置
+                <<: *php-build-args
                 PHP_VERSION: ${PHP85_VERSION}
-                CHANGE_SOURCE: ${CHANGE_SOURCE}
-                FALLBACK_MIRROR: ${FALLBACK_MIRROR:-}
-                BUILD_PROXY_TYPE: ${BUILD_PROXY_TYPE:-none}
                 PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-
-                # 多架构支持
-                BUILDPLATFORM: linux/amd64
-                TARGETPLATFORM: linux/amd64
-
-                # 库版本配置
-                LIBWEBP_VERSION: ${LIBWEBP_VERSION}
-                XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
                 SWOOLE_EXT_VERSION: ${SWOOLE_EXT_VERSION}
-                GRPC_EXT_VERSION: ${GRPC_EXT_VERSION}
-                REDIS_EXT_VERSION: ${REDIS_EXT_VERSION}
-                LIBRDKAFKA_VERSION: ${LIBRDKAFKA_VERSION}
-                RDKAFKA_EXT_VERSION: ${RDKAFKA_EXT_VERSION}
-                ZOOKEEPER_VERSION: ${ZOOKEEPER_VERSION}
-                ZOOKEEPER_EXT_VERSION: ${ZOOKEEPER_EXT_VERSION}
-                PROTOBUF_VERSION: ${PROTOBUF_VERSION}
-                PROTOBUF_EXT_VERSION: ${PROTOBUF_EXT_VERSION}
-                MONGODB_EXT_VERSION: ${MONGODB_EXT_VERSION}
-                IMAGICK_EXT_VERSION: ${IMAGICK_EXT_VERSION}
-                IMAGICK_VERSION: ${IMAGICK_VERSION}
-                MEMCACHED_VERSION: ${MEMCACHED_VERSION}
                 OPENSSL_VERSION: ${OPENSSL_VERSION}
-                CURL_VERSION: ${CURL_VERSION}
-                LIBSODIUM_VERSION: ${LIBSODIUM_VERSION}
-                LIBICONV_VERSION: ${LIBICONV_VERSION}
-                FREETYPE_VERSION: ${FREETYPE_VERSION}
-                YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-                <<: *php-nvm-build-args
-
-            # 构建参数优化
-            shm_size: 1024m # 增加共享内存，加速编译
-
-        # 存储卷配置 (优化版)
         volumes:
-            # 应用代码 (只读挂载提高安全性)
-            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
-
-            # 日志目录 (专用卷)
-            - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
-
-            # PHP扩展安装日志目录
-            - ../../logs/php-extensions:/var/log/php-extensions:rw,Z
-
-            # 虚拟主机配置
+            - ${GLOBAL_WEB_PATH}:/var/www/html:ro,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
-
-            # PHP配置
             - ${PHP85_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
-            # hardening：版本目录优先，缺失时 derive 回落 common（覆盖 php.ini 同名项）
             - ${PHP85_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
-            # OPcache：全版本统一 common/opcache.ini
             - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
-            # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
-
-            # 缓存卷 (性能优化)
-            - php_sessions:/tmp/php_sessions:rw
-
-            # 临时文件优化
-            - type: tmpfs
-              target: /tmp/php_upload
-              tmpfs:
-                  size: 100m
-
-        # 端口映射
-        ports:
-            - '${PHP85_PORT}:88'
-        restart: unless-stopped # 或 always
-        networks:
-            - default
-            - backend
-        # 标签配置
+        ports: ['${PHP85_PORT}:88']
         labels:
-            - 'traefik.enable=true'
+            - traefik.enable=true
             - 'traefik.http.routers.php85.rule=Host(`${PHP85_SERVER_NAME}`)'
-            - 'traefik.http.services.php85.loadbalancer.server.port=88'
-            - 'com.project.environment=${ENVIRONMENT:-development}'
-            - 'com.project.version=${VERSION:-latest}'
+            - traefik.http.services.php85.loadbalancer.server.port=88
 
-    ################  php84 #############################
     php84_apache:
-        <<: *default-common
+        <<: *php-runtime
         container_name: php84_apache
         hostname: php84-apache
         image: hg_dnmpr_php84_apache:latest
-
         build:
-            context: ../..
-            dockerfile: build/php/8.4/Dockerfile
-            network: host # 使用主机网络解决DNS问题
+            <<: *php-build
             args:
-                # 基础配置
+                <<: *php-build-args
                 PHP_VERSION: ${PHP84_VERSION}
-                CHANGE_SOURCE: ${CHANGE_SOURCE}
-                FALLBACK_MIRROR: ${FALLBACK_MIRROR:-}
-                BUILD_PROXY_TYPE: ${BUILD_PROXY_TYPE:-none}
                 PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-
-                # 多架构支持
-                BUILDPLATFORM: linux/amd64
-                TARGETPLATFORM: linux/amd64
-
-                # 库版本配置
-                LIBWEBP_VERSION: ${LIBWEBP_VERSION}
-                XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
                 SWOOLE_EXT_VERSION: ${SWOOLE_EXT_VERSION}
-                GRPC_EXT_VERSION: ${GRPC_EXT_VERSION}
-                REDIS_EXT_VERSION: ${REDIS_EXT_VERSION}
-                LIBRDKAFKA_VERSION: ${LIBRDKAFKA_VERSION}
-                RDKAFKA_EXT_VERSION: ${RDKAFKA_EXT_VERSION}
-                ZOOKEEPER_VERSION: ${ZOOKEEPER_VERSION}
-                ZOOKEEPER_EXT_VERSION: ${ZOOKEEPER_EXT_VERSION}
-                PROTOBUF_VERSION: ${PROTOBUF_VERSION}
-                PROTOBUF_EXT_VERSION: ${PROTOBUF_EXT_VERSION}
-                MONGODB_EXT_VERSION: ${MONGODB_EXT_VERSION}
-                IMAGICK_EXT_VERSION: ${IMAGICK_EXT_VERSION}
-                IMAGICK_VERSION: ${IMAGICK_VERSION}
-                MEMCACHED_VERSION: ${MEMCACHED_VERSION}
                 OPENSSL_VERSION: ${OPENSSL_VERSION}
-                CURL_VERSION: ${CURL_VERSION}
-                LIBSODIUM_VERSION: ${LIBSODIUM_VERSION}
-                LIBICONV_VERSION: ${LIBICONV_VERSION}
-                FREETYPE_VERSION: ${FREETYPE_VERSION}
-                YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-                <<: *php-nvm-build-args
-
-            # 构建参数优化
-            shm_size: 1024m # 增加共享内存，加速编译
-
-        # 存储卷配置 (优化版)
         volumes:
-            # 应用代码 (只读挂载提高安全性)
-            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
-
-            # 日志目录 (专用卷)
-            - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
-
-            # PHP扩展安装日志目录
-            - ../../logs/php-extensions:/var/log/php-extensions:rw,Z
-
-            # 虚拟主机配置
+            - ${GLOBAL_WEB_PATH}:/var/www/html:ro,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
-
-            # PHP配置
             - ${PHP84_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
             - ${PHP84_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
             - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
-            # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
-
-            # 缓存卷 (性能优化)
-            - php_sessions:/tmp/php_sessions:rw
-
-            # 临时文件优化
-            - type: tmpfs
-              target: /tmp/php_upload
-              tmpfs:
-                  size: 100m
-
-        # 端口映射
-        ports:
-            - '${PHP84_PORT}:88'
-        restart: unless-stopped # 或 always
-        networks:
-            - default
-            - backend
-        # 标签配置
+        ports: ['${PHP84_PORT}:88']
         labels:
-            - 'traefik.enable=true'
+            - traefik.enable=true
             - 'traefik.http.routers.php84.rule=Host(`${PHP84_SERVER_NAME}`)'
-            - 'traefik.http.services.php84.loadbalancer.server.port=88'
-            - 'com.project.environment=${ENVIRONMENT:-development}'
-            - 'com.project.version=${VERSION:-latest}'
+            - traefik.http.services.php84.loadbalancer.server.port=88
 
-    ################  php83 #############################
     php83_apache:
-        <<: *default-common
+        <<: *php-runtime
         container_name: php83_apache
         hostname: php83-apache
         image: hg_dnmpr_php83_apache:latest
-
         build:
-            context: ../..
-            dockerfile: build/php/8.3/Dockerfile
-            network: host # 使用主机网络解决DNS问题
+            <<: *php-build
             args:
+                <<: *php-build-args
                 PHP_VERSION: ${PHP83_VERSION}
-                CHANGE_SOURCE: ${CHANGE_SOURCE}
-                FALLBACK_MIRROR: ${FALLBACK_MIRROR:-}
-                BUILD_PROXY_TYPE: ${BUILD_PROXY_TYPE:-none}
                 PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-
-                # 多架构支持
-                BUILDPLATFORM: linux/amd64
-                TARGETPLATFORM: linux/amd64
-
-                # 库版本配置
-                LIBWEBP_VERSION: ${LIBWEBP_VERSION}
-                XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
                 SWOOLE_EXT_VERSION: ${SWOOLE_EXT_VERSION}
-                GRPC_EXT_VERSION: ${GRPC_EXT_VERSION}
-                REDIS_EXT_VERSION: ${REDIS_EXT_VERSION}
-                LIBRDKAFKA_VERSION: ${LIBRDKAFKA_VERSION}
-                RDKAFKA_EXT_VERSION: ${RDKAFKA_EXT_VERSION}
-                ZOOKEEPER_VERSION: ${ZOOKEEPER_VERSION}
-                ZOOKEEPER_EXT_VERSION: ${ZOOKEEPER_EXT_VERSION}
-                PROTOBUF_VERSION: ${PROTOBUF_VERSION}
-                PROTOBUF_EXT_VERSION: ${PROTOBUF_EXT_VERSION}
-                MONGODB_EXT_VERSION: ${MONGODB_EXT_VERSION}
-                IMAGICK_EXT_VERSION: ${IMAGICK_EXT_VERSION}
-                IMAGICK_VERSION: ${IMAGICK_VERSION}
-                MEMCACHED_VERSION: ${MEMCACHED_VERSION}
                 OPENSSL_VERSION: ${OPENSSL_VERSION}
-                CURL_VERSION: ${CURL_VERSION}
-                LIBSODIUM_VERSION: ${LIBSODIUM_VERSION}
-                LIBICONV_VERSION: ${LIBICONV_VERSION}
-                FREETYPE_VERSION: ${FREETYPE_VERSION}
-                YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-                <<: *php-nvm-build-args
-
-            # 构建缓存优化
-            shm_size: 1024m
-
         volumes:
-            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
-            - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
-            - ../../logs/php-extensions:/var/log/php-extensions:rw,Z
+            - ${GLOBAL_WEB_PATH}:/var/www/html:ro,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP83_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
             - ${PHP83_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
             - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
-            # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
-            - php_sessions:/tmp/php_sessions:rw
-            - type: tmpfs
-              target: /tmp/php_upload
-              tmpfs:
-                  size: 100m
-
-        ports:
-            - '${PHP83_PORT}:88'
-        networks:
-            - default
-            - backend
+        ports: ['${PHP83_PORT}:88']
         labels:
-            - 'traefik.enable=true'
+            - traefik.enable=true
             - 'traefik.http.routers.php83.rule=Host(`${PHP83_SERVER_NAME}`)'
-            - 'traefik.http.services.php83.loadbalancer.server.port=88'
-            - 'com.project.environment=${ENVIRONMENT:-development}'
-            - 'com.project.version=${VERSION:-latest}'
+            - traefik.http.services.php83.loadbalancer.server.port=88
 
-    ################  php82 #############################
     php82_apache:
-        <<: *default-common
+        <<: *php-runtime
         container_name: php82_apache
         hostname: php82-apache
         image: hg_dnmpr_php82_apache:latest
-
         build:
-            context: ../..
-            dockerfile: build/php/8.2/Dockerfile
-            network: host # 使用主机网络解决DNS问题
+            <<: *php-build
             args:
+                <<: *php-build-args
                 PHP_VERSION: ${PHP82_VERSION}
-                CHANGE_SOURCE: ${CHANGE_SOURCE}
-                FALLBACK_MIRROR: ${FALLBACK_MIRROR:-}
-                BUILD_PROXY_TYPE: ${BUILD_PROXY_TYPE:-none}
                 PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-
-                # 多架构支持
-                BUILDPLATFORM: linux/amd64
-                TARGETPLATFORM: linux/amd64
-
-                # 库版本配置 (复用相同的模式)
-                LIBWEBP_VERSION: ${LIBWEBP_VERSION}
-                XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
                 SWOOLE_EXT_VERSION: ${SWOOLE_EXT_VERSION}
-                GRPC_EXT_VERSION: ${GRPC_EXT_VERSION}
-                REDIS_EXT_VERSION: ${REDIS_EXT_VERSION}
-                LIBRDKAFKA_VERSION: ${LIBRDKAFKA_VERSION}
-                RDKAFKA_EXT_VERSION: ${RDKAFKA_EXT_VERSION}
-                ZOOKEEPER_VERSION: ${ZOOKEEPER_VERSION}
-                ZOOKEEPER_EXT_VERSION: ${ZOOKEEPER_EXT_VERSION}
-                PROTOBUF_VERSION: ${PROTOBUF_VERSION}
-                PROTOBUF_EXT_VERSION: ${PROTOBUF_EXT_VERSION}
-                MONGODB_EXT_VERSION: ${MONGODB_EXT_VERSION}
-                IMAGICK_EXT_VERSION: ${IMAGICK_EXT_VERSION}
-                IMAGICK_VERSION: ${IMAGICK_VERSION}
-                MEMCACHED_VERSION: ${MEMCACHED_VERSION}
                 OPENSSL_VERSION: ${OPENSSL_VERSION}
-                CURL_VERSION: ${CURL_VERSION}
-                LIBSODIUM_VERSION: ${LIBSODIUM_VERSION}
-                LIBICONV_VERSION: ${LIBICONV_VERSION}
-                FREETYPE_VERSION: ${FREETYPE_VERSION}
-                YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-                <<: *php-nvm-build-args
-
-            shm_size: 1024m
-
         volumes:
-            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
-            - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
-            - ../../logs/php-extensions:/var/log/php-extensions:rw,Z
+            - ${GLOBAL_WEB_PATH}:/var/www/html:ro,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP82_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
             - ${PHP82_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
             - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
-            # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
-            - php_sessions:/tmp/php_sessions:rw
-            - /etc/localtime:/etc/localtime:ro
-            - type: tmpfs
-              target: /tmp/php_upload
-              tmpfs:
-                  size: 100m
-
-        ports:
-            - '${PHP82_PORT}:88'
-        restart: unless-stopped # 或 always
-        networks:
-            - default
-            - backend
+        ports: ['${PHP82_PORT}:88']
         labels:
-            - 'traefik.enable=true'
+            - traefik.enable=true
             - 'traefik.http.routers.php82.rule=Host(`${PHP82_SERVER_NAME}`)'
-            - 'traefik.http.services.php82.loadbalancer.server.port=88'
-            - 'com.project.environment=${ENVIRONMENT:-development}'
-            - 'com.project.version=${VERSION:-latest}'
+            - traefik.http.services.php82.loadbalancer.server.port=88
 
-    ################   php81 (使用版本化 Dockerfile) ###################################
     php81_apache:
-        <<: *default-common
+        <<: *php-runtime
         container_name: php81_apache
         hostname: php81-apache
         image: hg_dnmpr_php81_apache:latest
-
         build:
-            context: ../..
-            dockerfile: build/php/8.1/Dockerfile
-            network: host # 使用主机网络解决DNS问题
+            <<: *php-build
             args:
+                <<: *php-build-args
                 PHP_VERSION: ${PHP81_VERSION}
-                CHANGE_SOURCE: ${CHANGE_SOURCE}
-                FALLBACK_MIRROR: ${FALLBACK_MIRROR:-}
-                BUILD_PROXY_TYPE: ${BUILD_PROXY_TYPE:-none}
                 PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-                LIBWEBP_VERSION: ${LIBWEBP_VERSION}
-                XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
-                SWOOLE_EXT_VERSION: ${SWOOLE_EXT_VERSION}
-                GRPC_EXT_VERSION: ${GRPC_EXT_VERSION}
-                REDIS_EXT_VERSION: ${REDIS_EXT_VERSION}
-                LIBRDKAFKA_VERSION: ${LIBRDKAFKA_VERSION}
-                RDKAFKA_EXT_VERSION: ${RDKAFKA_EXT_VERSION}
-                ZOOKEEPER_VERSION: ${ZOOKEEPER_VERSION}
-                ZOOKEEPER_EXT_VERSION: ${ZOOKEEPER_EXT_VERSION}
-                PROTOBUF_VERSION: ${PROTOBUF_VERSION}
-                PROTOBUF_EXT_VERSION: ${PROTOBUF_EXT_VERSION}
-                MONGODB_EXT_VERSION: ${MONGODB_EXT_VERSION}
-                IMAGICK_EXT_VERSION: ${IMAGICK_EXT_VERSION}
-                IMAGICK_VERSION: ${IMAGICK_VERSION}
-                MEMCACHED_VERSION: ${MEMCACHED_VERSION}
+                # Swoole 6.2+ 要求 PHP >= 8.2；8.1 继续使用 6.0.x 线。
+                SWOOLE_EXT_VERSION: ${SWOOLE60_EXT_VERSION}
                 OPENSSL_VERSION: ${OPENSSL_VERSION}
-                CURL_VERSION: ${CURL_VERSION}
-                LIBSODIUM_VERSION: ${LIBSODIUM_VERSION}
-                LIBICONV_VERSION: ${LIBICONV_VERSION}
-                FREETYPE_VERSION: ${FREETYPE_VERSION}
-                YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-                <<: *php-nvm-build-args
-
         volumes:
-            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
-            - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
-            - ../../logs/php-extensions:/var/log/php-extensions:rw,Z
+            - ${GLOBAL_WEB_PATH}:/var/www/html:ro,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP81_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
             - ${PHP81_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
             - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
-            # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
-            - php_sessions:/tmp/php_sessions:rw
-            - type: tmpfs
-              target: /tmp/php_upload
-              tmpfs:
-                  size: 100m
-
-        ports:
-            - '${PHP81_PORT}:88'
-        networks:
-            - default
-            - backend
+        ports: ['${PHP81_PORT}:88']
         labels:
-            - 'traefik.enable=true'
+            - traefik.enable=true
             - 'traefik.http.routers.php81.rule=Host(`${PHP81_SERVER_NAME}`)'
-            - 'traefik.http.services.php81.loadbalancer.server.port=88'
-            - 'com.project.environment=${ENVIRONMENT:-development}'
-            - 'com.project.version=${VERSION:-latest}'
+            - traefik.http.services.php81.loadbalancer.server.port=88
 
-    ################   php80 (使用版本化 Dockerfile) ############################
     php80_apache:
-        <<: *default-common
+        <<: *php-runtime
         container_name: php80_apache
         hostname: php80-apache
         image: hg_dnmpr_php80_apache:latest
-
         build:
-            context: ../..
-            dockerfile: build/php/8.0/Dockerfile
-            network: host # 使用主机网络解决DNS问题
+            <<: *php-build
             args:
+                <<: *php-build-args
                 PHP_VERSION: ${PHP80_VERSION}
-                CHANGE_SOURCE: ${CHANGE_SOURCE}
-                FALLBACK_MIRROR: ${FALLBACK_MIRROR:-}
-                BUILD_PROXY_TYPE: ${BUILD_PROXY_TYPE:-none}
                 PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-                LIBWEBP_VERSION: ${LIBWEBP_VERSION}
-                XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
-                SWOOLE_EXT_VERSION: ${SWOOLE60_EXT_VERSION}
-                GRPC_EXT_VERSION: ${GRPC_EXT_VERSION}
-                REDIS_EXT_VERSION: ${REDIS_EXT_VERSION}
-                LIBRDKAFKA_VERSION: ${LIBRDKAFKA_VERSION}
-                RDKAFKA_EXT_VERSION: ${RDKAFKA_EXT_VERSION}
-                ZOOKEEPER_VERSION: ${ZOOKEEPER_VERSION}
-                ZOOKEEPER_EXT_VERSION: ${ZOOKEEPER_EXT_VERSION}
-                PROTOBUF_VERSION: ${PROTOBUF_VERSION}
-                PROTOBUF_EXT_VERSION: ${PROTOBUF_EXT_VERSION}
-                MONGODB_EXT_VERSION: ${MONGODB_EXT_VERSION}
-                IMAGICK_EXT_VERSION: ${IMAGICK_EXT_VERSION}
-                IMAGICK_VERSION: ${IMAGICK_VERSION}
-                MEMCACHED_VERSION: ${MEMCACHED_VERSION}
-                OPENSSL_VERSION: ${OPENSSL_VERSION_11} # 注意PHP80使用OpenSSL 1.1
-                CURL_VERSION: ${CURL_VERSION}
-                LIBSODIUM_VERSION: ${LIBSODIUM_VERSION}
-                LIBICONV_VERSION: ${LIBICONV_VERSION}
-                FREETYPE_VERSION: ${FREETYPE_VERSION}
-                YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-                <<: *php-nvm-build-args
-
+                # Swoole 6.0+ 要求 PHP >= 8.1；8.0 使用 5.1.x。
+                SWOOLE_EXT_VERSION: ${SWOOLE7_EXT_VERSION}
+                OPENSSL_VERSION: ${OPENSSL_VERSION_11}
         volumes:
-            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
-            - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
-            - ../../logs/php-extensions:/var/log/php-extensions:rw,Z
+            - ${GLOBAL_WEB_PATH}:/var/www/html:ro,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP80_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
             - ${PHP80_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
             - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
-            # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
-            - php_sessions:/tmp/php_sessions:rw
-            - type: tmpfs
-              target: /tmp/php_upload
-              tmpfs:
-                  size: 100m
-
-        ports:
-            - '${PHP80_PORT}:88'
-        networks:
-            - default
-            - backend
+        ports: ['${PHP80_PORT}:88']
         labels:
-            - 'traefik.enable=true'
+            - traefik.enable=true
             - 'traefik.http.routers.php80.rule=Host(`${PHP80_SERVER_NAME}`)'
-            - 'traefik.http.services.php80.loadbalancer.server.port=88'
-            - 'com.project.environment=${ENVIRONMENT:-development}'
-            - 'com.project.version=${VERSION:-latest}'
+            - traefik.http.services.php80.loadbalancer.server.port=88
 
-    ################   php74 (使用版本化 Dockerfile) ##############################
     php74_apache:
-        <<: *default-common
+        <<: *php-runtime
         container_name: php74_apache
         hostname: php74-apache
         image: hg_dnmpr_php74_apache:latest
-
         build:
-            context: ../..
-            dockerfile: build/php/7.4/Dockerfile
-            network: host # 使用主机网络解决DNS问题
+            <<: *php-build
             args:
+                <<: *php-build-args
                 PHP_VERSION: ${PHP74_VERSION}
-                CHANGE_SOURCE: ${CHANGE_SOURCE}
-                FALLBACK_MIRROR: ${FALLBACK_MIRROR:-}
-                BUILD_PROXY_TYPE: ${BUILD_PROXY_TYPE:-none}
                 PHP_EXTENSIONS: ${PHP_COMMON_EXTENSIONS}
-                LIBWEBP_VERSION: ${LIBWEBP_VERSION}
-                SWOOLE_EXT_VERSION: ${SWOOLE7_EXT_VERSION} # 注意PHP74使用不同的Swoole版本
-                XDEBUG_EXT_VERSION: ${XDEBUG_EXT_VERSION}
-                GRPC_EXT_VERSION: ${GRPC_EXT_VERSION}
-                REDIS_EXT_VERSION: ${REDIS_EXT_VERSION}
-                LIBRDKAFKA_VERSION: ${LIBRDKAFKA_VERSION}
-                RDKAFKA_EXT_VERSION: ${RDKAFKA_EXT_VERSION}
-                ZOOKEEPER_VERSION: ${ZOOKEEPER_VERSION}
-                ZOOKEEPER_EXT_VERSION: ${ZOOKEEPER_EXT_VERSION}
-                PROTOBUF_VERSION: ${PROTOBUF_VERSION}
-                PROTOBUF_EXT_VERSION: ${PROTOBUF_EXT_VERSION}
-                MONGODB_EXT_VERSION: ${MONGODB_EXT_VERSION}
-                IMAGICK_EXT_VERSION: ${IMAGICK_EXT_VERSION}
-                IMAGICK_VERSION: ${IMAGICK_VERSION}
-                MEMCACHED_VERSION: ${MEMCACHED_VERSION}
-                OPENSSL_VERSION: ${OPENSSL_VERSION_11} # 注意PHP74使用OpenSSL 1.1
-                CURL_VERSION: ${CURL_VERSION}
-                LIBSODIUM_VERSION: ${LIBSODIUM_VERSION}
-                LIBICONV_VERSION: ${LIBICONV_VERSION}
-                FREETYPE_VERSION: ${FREETYPE_VERSION}
-                YAML_EXT_VERSION: ${YAML_EXT_VERSION}
-                <<: *php-nvm-build-args
-
+                SWOOLE_EXT_VERSION: ${SWOOLE7_EXT_VERSION}
+                OPENSSL_VERSION: ${OPENSSL_VERSION_11}
         volumes:
-            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
-            - ${APACHE_LOG_DIR}:/etc/apache2/logs/apache:rw,Z
-            - ../../logs/php-extensions:/var/log/php-extensions:rw,Z
+            - ${GLOBAL_WEB_PATH}:/var/www/html:ro,Z
             - ${APACHE_VHOST_DIR}:/etc/apache2/sites-enabled:ro,Z
             - ${PHP74_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro,Z
             - ${PHP74_HARDENING_INI_FILE:-../../build/php/common/hardening.ini}:/usr/local/etc/php/conf.d/zz-hardening.ini:ro,Z
             - ${PHP_OPCACHE_INI_FILE:-../../build/php/common/opcache.ini}:/usr/local/etc/php/conf.d/zz-opcache.ini:ro,Z
-            # PHP 运行时覆盖配置（由 up.sh 按 ENVIRONMENT 生成并挂载到 conf.d 生效）
             - ${PHP_PROFILE_INI_FILE:-../../build/php/common/zz-profile-overrides.ini}:/usr/local/etc/php/conf.d/zz-profile-overrides.ini:ro,Z
-            - php_sessions:/tmp/php_sessions:rw
-            - type: tmpfs
-              target: /tmp/php_upload
-              tmpfs:
-                  size: 100m
-            - /etc/localtime:/etc/localtime:ro
-
-        ports:
-            - '${PHP74_PORT}:88'
-        restart: unless-stopped # 或 always
-        networks:
-            - default
-            - backend
+        ports: ['${PHP74_PORT}:88']
         labels:
-            - 'traefik.enable=true'
+            - traefik.enable=true
             - 'traefik.http.routers.php74.rule=Host(`${PHP74_SERVER_NAME}`)'
-            - 'traefik.http.services.php74.loadbalancer.server.port=88'
-            - 'com.project.environment=${ENVIRONMENT:-development}'
-            - 'com.project.version=${VERSION:-latest}'
+            - traefik.http.services.php74.loadbalancer.server.port=88

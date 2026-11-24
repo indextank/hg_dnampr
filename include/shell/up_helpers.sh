@@ -196,7 +196,7 @@ show_help() {
     ./up.sh [服务名...] [操作] [选项]
 
 服务名:
-    php85, php84, php83, php82, php81, php80, php74  - PHP 服务
+    php86, php85, php84, php83, php82, php81, php80, php74  - PHP 服务
     nginx, tengine                                    - Web 服务器（二选一）
     mysql                                            - MySQL 数据库
     redis, valkey                                     - 缓存服务

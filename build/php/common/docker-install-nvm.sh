@@ -26,7 +26,7 @@ case "$mirror" in
 *) mirror="${mirror}/" ;;
 esac
 
-export NVM_DIR="${NVM_DIR:-/root/.nvm}"
+export NVM_DIR="${NVM_DIR:-/opt/nvm}"
 export NVM_NODEJS_ORG_MIRROR="$mirror"
 NVM_GIT_REF="${NVM_GIT_REF:-v0.40.1}"
 
@@ -66,6 +66,10 @@ for f in node npm npx corepack; do
 		ln -sf "$bindir/$f" "/usr/local/bin/$f"
 	fi
 done
+
+# Runtime containers use www-data; keep the optional toolchain readable
+# without retaining a root-only home directory.
+chmod -R a+rX "$NVM_DIR"
 
 /usr/local/bin/node -v
 /usr/local/bin/npm -v

@@ -22,7 +22,7 @@
 
 # --- 单一事实：带 Apache 容器后缀的 PHP 版本（新增版本只改这里） ---
 # 顺序用于 build 的 "all" 展开展示顺序。
-HG_PHP_APACHE_VERSIONS=(85 84 83 82 81 80 74 72)
+HG_PHP_APACHE_VERSIONS=(86 85 84 83 82 81 80 74 72)
 
 # 内部：判断短名是否为带 Apache 后缀的 PHP 服务
 _is_php_apache_short() {

@@ -28,7 +28,7 @@ restore_temp_dockerignore() {
 is_php_build_target() {
     local service="$1"
     case "$service" in
-        php85_apache|php84_apache|php83_apache|php82_apache|php81_apache|php80_apache|php74_apache)
+        php86_apache|php85_apache|php84_apache|php83_apache|php82_apache|php81_apache|php80_apache|php74_apache)
             return 0
             ;;
         *)

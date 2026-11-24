@@ -1,6 +1,16 @@
 #!/bin/bash
+set -Eeuo pipefail
+IFS=$'\n\t'
 
 export MC="-j$(nproc)"
+
+DOWNLOAD_HELPER="${DOWNLOAD_HELPER:-/tmp/download-helper.sh}"
+if [ ! -r "${DOWNLOAD_HELPER}" ]; then
+    echo "ERROR: 下载校验助手不存在: ${DOWNLOAD_HELPER}"
+    exit 1
+fi
+# shellcheck source=/dev/null
+. "${DOWNLOAD_HELPER}"
 
 echo
 echo "============================================"
@@ -15,18 +25,24 @@ echo
 php_detail_version=$(/usr/local/bin/php-config --version)
 php_main_version=${php_detail_version%.*}
 
+if [[ "${php_main_version}" == "8.6" ]]; then
+    for unsupported_extension in swoole xdebug yaml imagick; do
+        if [ -z "${EXTENSIONS##*,${unsupported_extension},*}" ]; then
+            echo "ERROR: PHP 8.6 暂不允许安装 ${unsupported_extension}；请从 PHP86_EXTENSIONS 中排除该扩展"
+            exit 1
+        fi
+    done
+fi
+
 if [ "${PHP_EXTENSIONS}" != "" ]; then
     echo "---------- Install general dependencies ----------"
-    # mv /etc/apt/sources.list /etc/apt/sources.list.new
-    # cp -rf /etc/apt/sources.list.bak /etc/apt/sources.list
     apt-get update
     apt-get install -y --assume-yes --no-install-recommends apt-transport-https ca-certificates
 
-    sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
-    # mv /etc/apt/sources.list /etc/apt/sources.list.bak
-    # cp -rf /etc/apt/sources.list.new /etc/apt/sources.list
+    # 软件源由 Dockerfile 的 CHANGE_SOURCE/FALLBACK_MIRROR 统一决定。
+    # 此处禁止无条件改写，避免绕过用户选择或破坏 debian.sources。
     apt-get update
-    apt-get install -y --assume-yes lsof pkg-config apt-utils wget gcc g++ make cmake unzip autoconf automake libtool libssl-dev libpq-dev libedit-dev libzip-dev libicu-dev libxslt-dev binutils libyaml-dev iputils-ping nano libc-ares-dev libcurl4-openssl-dev libbrotli-dev
+    apt-get install -y --assume-yes lsof pkg-config apt-utils wget gcc g++ make cmake unzip autoconf automake libtool libssl-dev libpq-dev libedit-dev libzip-dev libicu-dev libxslt-dev binutils libyaml-dev libc-ares-dev libcurl4-openssl-dev libbrotli-dev
     rm -rf /var/lib/apt/lists/*
 fi
 
@@ -37,14 +53,20 @@ fi
 
 if [ -z "${EXTENSIONS##*,yaf,*}" ]; then
     echo "---------- Install yaf ----------"
-    printf "\n" | pecl install yaf
+    if [ -z "${YAF_EXT_VERSION:-}" ]; then
+        echo "ERROR: YAF_EXT_VERSION 为空，无法可信校验 PECL 包"
+        exit 1
+    fi
+    download_pecl_package_verified "yaf" "${YAF_EXT_VERSION}" "yaf-${YAF_EXT_VERSION}.tgz" || exit 1
+    printf "\n" | pecl install "./yaf-${YAF_EXT_VERSION}.tgz"
     docker-php-ext-enable yaf
 fi
 
 if [ -z "${EXTENSIONS##*,memcached,*}" ]; then
     echo "---------- Install memcached extension ----------"
     apt-get update && apt-get install -y libmemcached-dev zlib1g-dev && \
-    printf "\n" | pecl install memcached-3.2.0 && \
+    download_pecl_package_verified "memcached" "3.2.0" "memcached-3.2.0.tgz" && \
+    printf "\n" | pecl install "./memcached-3.2.0.tgz" && \
     docker-php-ext-enable memcached
 fi
 
@@ -53,10 +75,8 @@ if [ -z "${EXTENSIONS##*,swoole,*}" ]; then
     cd "${TMP_DIR}"
     echo "---------- Install swoole extension ----------"
 
-    if [[ "${php_main_version}" =~ ^7.[4]$ ]]; then
-        if [ ! -f swoole-4.8.13.tgz ]; then
-            wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/swoole-4.8.13.tgz
-        fi
+    if [[ "${php_main_version}" =~ ^7\.4$ ]]; then
+        download_pecl_package_verified "swoole" "4.8.13" "swoole-4.8.13.tgz" || exit 1
         if [ -f swoole-4.8.13.tgz ]; then
             mkdir swoole \
                 && tar -xf swoole-4.8.13.tgz -C swoole --strip-components=1 \
@@ -70,18 +90,21 @@ if [ -z "${EXTENSIONS##*,swoole,*}" ]; then
                 && docker-php-ext-enable swoole
         fi
     else
-        # PHP 8.x+
+        # PHP 8.x：按次要版本钳制 Swoole，避免 compose 传错版本时编译直接炸掉。
+        _swoole_ver="${SWOOLE_EXT_VERSION:-}"
+        case "${php_main_version}" in
+            8.0) _swoole_ver="${SWOOLE7_EXT_VERSION:-5.1.3}" ;;
+            8.1) _swoole_ver="${SWOOLE60_EXT_VERSION:-6.0.2}" ;;
+        esac
         # -n 判断SWOOLE_EXT_VERSION不为空
-        if [ -n "${SWOOLE_EXT_VERSION}" ]; then
+        if [ -n "${_swoole_ver}" ]; then
             _SWOOLE_INSTALLED=false
-            if [ ! -f swoole-${SWOOLE_EXT_VERSION}.tgz ]; then
-                wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/swoole-${SWOOLE_EXT_VERSION}.tgz
-            fi
+            download_pecl_package_verified "swoole" "${_swoole_ver}" "swoole-${_swoole_ver}.tgz" || exit 1
 
             # 验证下载的文件是否为有效的 tar 归档（PECL 对不存在的版本返回 HTML 错误页）
-            if [ -f swoole-${SWOOLE_EXT_VERSION}.tgz ] && tar -tf swoole-${SWOOLE_EXT_VERSION}.tgz >/dev/null 2>&1; then
+            if [ -f "swoole-${_swoole_ver}.tgz" ] && tar -tf "swoole-${_swoole_ver}.tgz" >/dev/null 2>&1; then
                 mkdir swoole \
-                    && tar -xf swoole-${SWOOLE_EXT_VERSION}.tgz -C swoole --strip-components=1 \
+                    && tar -xf "swoole-${_swoole_ver}.tgz" -C swoole --strip-components=1 \
                     && cd swoole \
                     && phpize \
                     && ./configure --enable-sockets --enable-brotli --enable-cares --enable-swoole-curl --with-openssl-dir=/usr/local/openssl \
@@ -92,17 +115,18 @@ if [ -z "${EXTENSIONS##*,swoole,*}" ]; then
                     && docker-php-ext-enable swoole \
                     && _SWOOLE_INSTALLED=true
             else
-                echo "WARNING: swoole-${SWOOLE_EXT_VERSION}.tgz 无效或不存在，回退到 pecl install swoole"
-                rm -f swoole-${SWOOLE_EXT_VERSION}.tgz
+                echo "ERROR: swoole-${_swoole_ver}.tgz 无效或不存在，拒绝未验证的回退下载"
+                rm -f "swoole-${_swoole_ver}.tgz"
+                exit 1
             fi
 
             if [ "$_SWOOLE_INSTALLED" = false ]; then
-                printf "\n" | pecl install swoole
-                docker-php-ext-enable swoole
+                echo "ERROR: swoole-${_swoole_ver} 未安装，拒绝未验证的回退下载"
+                exit 1
             fi
         else
-            printf "\n" | pecl install swoole
-            docker-php-ext-enable swoole
+            echo "ERROR: SWOOLE_EXT_VERSION 为空，无法可信校验 PECL 包"
+            exit 1
         fi
     fi
 
@@ -122,21 +146,19 @@ if [ -z "${EXTENSIONS##*,yaml,*}" ]; then
     # 8.[0-9]：覆盖 8.5 及后续 8.x；原写法只到 8.4，导致 8.5 静默跳过 yaml
     if [[ "${php_main_version}" =~ ^7.[4]$|8.[0-9]$ ]]; then
         if [ -n "${YAML_EXT_VERSION}" ]; then
-            if [ ! -f yaml-${YAML_EXT_VERSION}.tgz ]; then
-                wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/yaml-${YAML_EXT_VERSION}.tgz
-            fi
+            download_pecl_package_verified "yaml" "${YAML_EXT_VERSION}" "yaml-${YAML_EXT_VERSION}.tgz" || exit 1
             if [ -f yaml-${YAML_EXT_VERSION}.tgz ]; then
                 mkdir yaml \
                     && tar -xf yaml-${YAML_EXT_VERSION}.tgz -C yaml --strip-components=1 \
                     && ( cd yaml && phpize && ./configure && make ${MC} && make install && cd .. && rm -fr yaml ) \
                     && docker-php-ext-enable yaml
             else
-                printf "\n" | pecl install yaml
-                docker-php-ext-enable yaml
+                echo "ERROR: yaml-${YAML_EXT_VERSION}.tgz 缺失，拒绝未验证的回退下载"
+                exit 1
             fi
         else
-            printf "\n" | pecl install yaml
-            docker-php-ext-enable yaml
+            echo "ERROR: YAML_EXT_VERSION 为空，无法可信校验 PECL 包"
+            exit 1
         fi
     fi
 fi
@@ -147,22 +169,25 @@ if [ -z "${EXTENSIONS##*,redis,*}" ]; then
     cd "${TMP_DIR}"
     echo "---------- Install redis extension ----------"
 
-    if [ -n "${REDIS_EXT_VERSION}" ]; then
-        if [ ! -f redis-${REDIS_EXT_VERSION}.tgz ]; then
-            wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/redis-${REDIS_EXT_VERSION}.tgz
-        fi
-        if [ -f redis-${REDIS_EXT_VERSION}.tgz ]; then
+    _redis_ver="${REDIS_EXT_VERSION:-}"
+    # phpredis 6.1+ 要求 PHP >= 8.1；7.4/8.0 固定到仍兼容的 6.0.2。
+    case "${php_main_version}" in
+        7.4|8.0) _redis_ver="6.0.2" ;;
+    esac
+    if [ -n "${_redis_ver}" ]; then
+        download_pecl_package_verified "redis" "${_redis_ver}" "redis-${_redis_ver}.tgz" || exit 1
+        if [ -f "redis-${_redis_ver}.tgz" ]; then
             mkdir redis \
-                && tar -xf redis-${REDIS_EXT_VERSION}.tgz -C redis --strip-components=1 \
+                && tar -xf "redis-${_redis_ver}.tgz" -C redis --strip-components=1 \
                 && ( cd redis && phpize && ./configure && make ${MC} && make install && cd .. && rm -fr redis ) \
                 && docker-php-ext-enable redis
         else
-            printf "\n" | pecl install redis
-            docker-php-ext-enable redis
+            echo "ERROR: redis-${_redis_ver}.tgz 缺失，拒绝未验证的回退下载"
+            exit 1
         fi
     else
-        printf "\n" | pecl install redis
-        docker-php-ext-enable redis
+        echo "ERROR: REDIS_EXT_VERSION 为空，无法可信校验 PECL 包"
+        exit 1
     fi
 fi
 
@@ -173,9 +198,7 @@ if [ -z "${EXTENSIONS##*,xdebug,*}" ]; then
     echo "---------- Install xdebug extension ----------"
 
     if [[ "${php_main_version}" =~ ^7.[4]$ ]]; then
-        if [ ! -f xdebug-3.1.6.tgz ]; then
-            wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/xdebug-3.1.6.tgz
-        fi
+        download_pecl_package_verified "xdebug" "3.1.6" "xdebug-3.1.6.tgz" || exit 1
         if [ -f xdebug-3.1.6.tgz ]; then
             mkdir xdebug \
                 && tar -xf xdebug-3.1.6.tgz -C xdebug --strip-components=1 \
@@ -184,9 +207,7 @@ if [ -z "${EXTENSIONS##*,xdebug,*}" ]; then
         fi
     else
         if [ -n "${XDEBUG_EXT_VERSION}" ]; then
-            if [ ! -f xdebug-${XDEBUG_EXT_VERSION}.tgz ]; then
-                wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/xdebug-${XDEBUG_EXT_VERSION}.tgz
-            fi
+            download_pecl_package_verified "xdebug" "${XDEBUG_EXT_VERSION}" "xdebug-${XDEBUG_EXT_VERSION}.tgz" || exit 1
 
             if [ -f xdebug-${XDEBUG_EXT_VERSION}.tgz ]; then
                 mkdir xdebug \
@@ -194,12 +215,12 @@ if [ -z "${EXTENSIONS##*,xdebug,*}" ]; then
                     && ( cd xdebug && phpize && ./configure && make ${MC} && make install && cd .. && rm -fr xdebug) \
                     && docker-php-ext-enable xdebug
             else
-                printf "\n" | pecl install xdebug
-                docker-php-ext-enable xdebug
+                echo "ERROR: xdebug-${XDEBUG_EXT_VERSION}.tgz 缺失，拒绝未验证的回退下载"
+                exit 1
             fi
         else
-            printf "\n" | pecl install xdebug
-            docker-php-ext-enable xdebug
+            echo "ERROR: XDEBUG_EXT_VERSION 为空，无法可信校验 PECL 包"
+            exit 1
         fi
     fi
 
@@ -220,23 +241,12 @@ if [ -z "${EXTENSIONS##*,imagick,*}" ]; then
 
     cd "${TMP_DIR}"
 
-    if [ ! -f "/usr/local/imagemagick" ]; then
+    if [ ! -d "/usr/local/imagemagick" ]; then
         echo "---------- Install ImageMagick ----------"
 
-        if [ ! -f ImageMagick-${IMAGICK_VERSION}.tar.gz ]; then
-            # --http1.1：规避 GitHub CDN 在 HTTP/2 下未干净关闭流导致的 curl exit 18；
-            # curl 非 0 但文件已完整时（exit 18）只要 gzip 校验通过就继续。
-            if ! curl -fL --http1.1 --retry 3 --retry-delay 5 \
-                    "https://github.com/ImageMagick/ImageMagick/archive/refs/tags/${IMAGICK_VERSION}.tar.gz" \
-                    -o "ImageMagick-${IMAGICK_VERSION}.tar.gz"; then
-                if ! gzip -t "ImageMagick-${IMAGICK_VERSION}.tar.gz" >/dev/null 2>&1; then
-                    echo "ERROR: ImageMagick 源码下载失败（文件不完整）"
-                    rm -f "ImageMagick-${IMAGICK_VERSION}.tar.gz"
-                    exit 1
-                fi
-                echo "curl 返回非 0，但 ImageMagick 源码已完整，继续"
-            fi
-        fi
+        download_and_verify_sha256 \
+            "https://codeload.github.com/ImageMagick/ImageMagick/tar.gz/refs/tags/${IMAGICK_VERSION}" \
+            "ImageMagick-${IMAGICK_VERSION}.tar.gz" "${IMAGICK_SOURCE_SHA256:-}" || exit 1
         tar xzf ImageMagick-${IMAGICK_VERSION}.tar.gz
         cd ImageMagick-${IMAGICK_VERSION} > /dev/null
         ./configure --prefix=/usr/local/imagemagick --enable-shared --enable-static
@@ -249,22 +259,20 @@ if [ -z "${EXTENSIONS##*,imagick,*}" ]; then
     cd "${TMP_DIR}"
     echo "---------- Install imagick extension ----------"
 
-    if [ -n "${IMAGICK_VERSION}" ]; then
-        if [ ! -f imagick-${IMAGICK_EXT_VERSION}.tgz ]; then
-            wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/imagick-${IMAGICK_EXT_VERSION}.tgz
-        fi
+    if [ -n "${IMAGICK_EXT_VERSION}" ]; then
+        download_pecl_package_verified "imagick" "${IMAGICK_EXT_VERSION}" "imagick-${IMAGICK_EXT_VERSION}.tgz" || exit 1
         if [ -f imagick-${IMAGICK_EXT_VERSION}.tgz ]; then
             mkdir imagick \
                 && tar -xf imagick-${IMAGICK_EXT_VERSION}.tgz -C imagick --strip-components=1 \
                 && ( cd imagick && phpize && ./configure --with-imagick=/usr/local/imagemagick/ && make ${MC} && make install && cd .. && rm -fr imagick ) \
                 && docker-php-ext-enable imagick
         else
-            printf "\n" | pecl install imagick-${IMAGICK_EXT_VERSION}
-            docker-php-ext-enable imagick
+            echo "ERROR: imagick-${IMAGICK_EXT_VERSION}.tgz 缺失，拒绝未验证的回退下载"
+            exit 1
         fi
     else
-        printf "\n" | pecl install imagick-${IMAGICK_EXT_VERSION}
-        docker-php-ext-enable imagick
+        echo "ERROR: IMAGICK_EXT_VERSION 为空，无法可信校验 PECL 包"
+        exit 1
     fi
 fi
 
@@ -310,8 +318,8 @@ if [ -z "${EXTENSIONS##*,mongodb,*}" ]; then
         if [ -n "${MONGODB_EXT_VERSION}" ]; then
             SELECTED_MONGODB_VERSION="${MONGODB_EXT_VERSION}"
         else
-            printf "\n" | pecl install mongodb
-            docker-php-ext-enable mongodb
+            echo "ERROR: MONGODB_EXT_VERSION 为空，无法可信校验 PECL 包"
+            exit 1
         fi
     fi
 
@@ -319,17 +327,15 @@ if [ -z "${EXTENSIONS##*,mongodb,*}" ]; then
     if [ -n "${SELECTED_MONGODB_VERSION}" ]; then
         echo "Installing MongoDB extension version: ${SELECTED_MONGODB_VERSION}"
 
-        if [ ! -f mongodb-${SELECTED_MONGODB_VERSION}.tgz ]; then
-            echo "Downloading MongoDB extension ${SELECTED_MONGODB_VERSION}..."
-            wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/mongodb-${SELECTED_MONGODB_VERSION}.tgz
-        fi
+        echo "Downloading MongoDB extension ${SELECTED_MONGODB_VERSION}..."
+        download_pecl_package_verified "mongodb" "${SELECTED_MONGODB_VERSION}" \
+            "mongodb-${SELECTED_MONGODB_VERSION}.tgz" || exit 1
 
         if [ -f mongodb-${SELECTED_MONGODB_VERSION}.tgz ]; then
             mv mongodb-${SELECTED_MONGODB_VERSION}.tgz mongodb.tgz
         else
-            echo "Failed to download MongoDB extension ${SELECTED_MONGODB_VERSION}, trying PECL install"
-            printf "\n" | pecl install mongodb-${SELECTED_MONGODB_VERSION}
-            docker-php-ext-enable mongodb
+            echo "ERROR: mongodb-${SELECTED_MONGODB_VERSION}.tgz 缺失，拒绝未验证的回退下载"
+            exit 1
         fi
     fi
 
@@ -399,21 +405,19 @@ if [ -z "${EXTENSIONS##*,grpc,*}" ]; then
     apt-get update && apt-get install -y zlib1g-dev
 
     if [ -n "${GRPC_EXT_VERSION}" ]; then
-        if [ ! -f grpc-${GRPC_EXT_VERSION}.tgz ]; then
-            wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/grpc-${GRPC_EXT_VERSION}.tgz
-        fi
+        download_pecl_package_verified "grpc" "${GRPC_EXT_VERSION}" "grpc-${GRPC_EXT_VERSION}.tgz" || exit 1
         if [ -f grpc-${GRPC_EXT_VERSION}.tgz ]; then
             mkdir grpc \
                 && tar -xf grpc-${GRPC_EXT_VERSION}.tgz -C grpc --strip-components=1 \
                 && ( cd grpc && phpize && ./configure && make ${MC} && make install && cd .. && rm -fr grpc ) \
                 && docker-php-ext-enable grpc
         else
-            printf "\n" | pecl install grpc
-            docker-php-ext-enable grpc
+            echo "ERROR: grpc-${GRPC_EXT_VERSION}.tgz 缺失，拒绝未验证的回退下载"
+            exit 1
         fi
     else
-        printf "\n" | pecl install grpc
-        docker-php-ext-enable grpc
+        echo "ERROR: GRPC_EXT_VERSION 为空，无法可信校验 PECL 包"
+        exit 1
     fi
 
     if [ -f "/usr/local/etc/php/conf.d/docker-php-ext-grpc.ini" ]; then
@@ -427,12 +431,21 @@ if [ -z "${EXTENSIONS##*,protobuf,*}" ]; then
     cd "${TMP_DIR}"
     echo "---------- Install protobuf ----------"
 
-    if [ ! -f protoc-${PROTOBUF_VERSION}-linux-x86_64.zip ]; then
-        wget --limit-rate=100M --tries=6 -c --no-check-certificate https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protoc-${PROTOBUF_VERSION}-linux-x86_64.zip
-    fi
+    case "$(uname -m)" in
+        x86_64|amd64) PROTOC_ARCH="x86_64" ;;
+        aarch64|arm64) PROTOC_ARCH="aarch_64" ;;
+        *)
+            echo "ERROR: protoc 不支持当前架构: $(uname -m)"
+            exit 1
+            ;;
+    esac
+    PROTOC_ARCHIVE="protoc-${PROTOBUF_VERSION}-linux-${PROTOC_ARCH}.zip"
+    download_and_verify_sha256 \
+        "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/${PROTOC_ARCHIVE}" \
+        "${PROTOC_ARCHIVE}" "${PROTOC_SHA256:-}" || exit 1
 
-    if [ -f protoc-${PROTOBUF_VERSION}-linux-x86_64.zip ]; then
-        unzip protoc-${PROTOBUF_VERSION}-linux-x86_64.zip
+    if [ -f "${PROTOC_ARCHIVE}" ]; then
+        unzip "${PROTOC_ARCHIVE}"
         cp bin/protoc /usr/local/bin/
         rm -fr bin include readme.txt
     fi
@@ -442,21 +455,19 @@ if [ -z "${EXTENSIONS##*,protobuf,*}" ]; then
         echo "---------- Install protobuf extension ----------"
 
         if [ -n "${PROTOBUF_EXT_VERSION}" ]; then
-            if [ ! -f protobuf-${PROTOBUF_EXT_VERSION}.tgz ]; then
-                wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/protobuf-${PROTOBUF_EXT_VERSION}.tgz
-            fi
+            download_pecl_package_verified "protobuf" "${PROTOBUF_EXT_VERSION}" "protobuf-${PROTOBUF_EXT_VERSION}.tgz" || exit 1
             if [ -f protobuf-${PROTOBUF_EXT_VERSION}.tgz ]; then
                 mkdir protobuf \
                     && tar -xf protobuf-${PROTOBUF_EXT_VERSION}.tgz -C protobuf --strip-components=1 \
                     && ( cd protobuf && phpize && ./configure && make ${MC} && make install && cd .. && rm -fr protobuf ) \
                     && docker-php-ext-enable protobuf
             else
-                printf "\n" | pecl install protobuf-${PROTOBUF_EXT_VERSION}
-                docker-php-ext-enable protobuf
+                echo "ERROR: protobuf-${PROTOBUF_EXT_VERSION}.tgz 缺失，拒绝未验证的回退下载"
+                exit 1
             fi
         else
-            printf "\n" | pecl install protobuf-${PROTOBUF_EXT_VERSION}
-            docker-php-ext-enable protobuf
+            echo "ERROR: PROTOBUF_EXT_VERSION 为空，无法可信校验 PECL 包"
+            exit 1
         fi
     fi
 fi
@@ -466,9 +477,9 @@ if [ -z "${EXTENSIONS##*,rdkafka,*}" ]; then
     cd "${TMP_DIR}"
     echo "---------- Install librdkafka ----------"
 
-    if [ ! -f librdkafka-${LIBRDKAFKA_VERSION}.tar.gz ]; then
-        wget --limit-rate=100M --tries=6 -c --no-check-certificate https://codeload.github.com/edenhill/librdkafka/tar.gz/v${LIBRDKAFKA_VERSION} -O librdkafka-${LIBRDKAFKA_VERSION}.tar.gz
-    fi
+    download_and_verify_sha256 \
+        "https://codeload.github.com/confluentinc/librdkafka/tar.gz/refs/tags/v${LIBRDKAFKA_VERSION}" \
+        "librdkafka-${LIBRDKAFKA_VERSION}.tar.gz" "${LIBRDKAFKA_SHA256:-}" || exit 1
 
     if [ -f librdkafka-${LIBRDKAFKA_VERSION}.tar.gz ]; then
         mkdir librdkafka \
@@ -479,21 +490,19 @@ if [ -z "${EXTENSIONS##*,rdkafka,*}" ]; then
         echo "---------- Install rdkafka extension ----------"
 
         if [ -n "${RDKAFKA_EXT_VERSION}" ]; then
-            if [ ! -f rdkafka-${RDKAFKA_EXT_VERSION}.tgz ]; then
-                wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/rdkafka-${RDKAFKA_EXT_VERSION}.tgz
-            fi
+            download_pecl_package_verified "rdkafka" "${RDKAFKA_EXT_VERSION}" "rdkafka-${RDKAFKA_EXT_VERSION}.tgz" || exit 1
             if [ -f rdkafka-${RDKAFKA_EXT_VERSION}.tgz ]; then
                 mkdir rdkafka \
                     && tar -xf rdkafka-${RDKAFKA_EXT_VERSION}.tgz -C rdkafka --strip-components=1 \
                     && ( cd rdkafka && phpize && ./configure && make ${MC} && make install && cd .. && rm -fr rdkafka ) \
                     && docker-php-ext-enable rdkafka
             else
-                printf "\n" | pecl install rdkafka
-                docker-php-ext-enable rdkafka
+                echo "ERROR: rdkafka-${RDKAFKA_EXT_VERSION}.tgz 缺失，拒绝未验证的回退下载"
+                exit 1
             fi
         else
-            printf "\n" | pecl install rdkafka
-            docker-php-ext-enable rdkafka
+            echo "ERROR: RDKAFKA_EXT_VERSION 为空，无法可信校验 PECL 包"
+            exit 1
         fi
     fi
 fi
@@ -504,9 +513,9 @@ if [ -z "${EXTENSIONS##*,zookeeper,*}" ]; then
     echo "---------- Install apache-zookeeper ----------"
     apt-get update && apt-get install -y libcppunit-dev file ant libcppunit-dev git
 
-    if [ ! -f apache-zookeeper-${ZOOKEEPER_VERSION}.tar.gz ]; then
-        wget --limit-rate=100M --tries=6 -c --no-check-certificate https://mirrors.tuna.tsinghua.edu.cn/apache/zookeeper/zookeeper-${ZOOKEEPER_VERSION}/apache-zookeeper-${ZOOKEEPER_VERSION}.tar.gz
-    fi
+    download_and_verify_sha256 \
+        "https://archive.apache.org/dist/zookeeper/zookeeper-${ZOOKEEPER_VERSION}/apache-zookeeper-${ZOOKEEPER_VERSION}.tar.gz" \
+        "apache-zookeeper-${ZOOKEEPER_VERSION}.tar.gz" "${ZOOKEEPER_SHA256:-}" || exit 1
 
     if [ -f apache-zookeeper-${ZOOKEEPER_VERSION}.tar.gz ]; then
         mkdir zookeeper \
@@ -524,21 +533,19 @@ if [ -z "${EXTENSIONS##*,zookeeper,*}" ]; then
         echo "---------- Install zookeeper extension ----------"
 
         if [ -n "${ZOOKEEPER_EXT_VERSION}" ]; then
-            if [ ! -f zookeeper-${ZOOKEEPER_EXT_VERSION}.tgz ];then
-                wget --limit-rate=100M --tries=6 -c --no-check-certificate https://pecl.php.net/get/zookeeper-${ZOOKEEPER_EXT_VERSION}.tgz
-            fi
+            download_pecl_package_verified "zookeeper" "${ZOOKEEPER_EXT_VERSION}" "zookeeper-${ZOOKEEPER_EXT_VERSION}.tgz" || exit 1
             if [ -f zookeeper-${ZOOKEEPER_EXT_VERSION}.tgz ]; then
                 mkdir zookeeper-ext \
                     && tar -xf zookeeper-${ZOOKEEPER_EXT_VERSION}.tgz -C zookeeper-ext --strip-components=1 \
                     && ( cd zookeeper-ext && phpize && ./configure --with-libzookeeper-dir=/usr/local/zookeeper && make ${MC} && make install && cd .. && rm -fr zookeeper-ext ) \
                     && docker-php-ext-enable zookeeper
             else
-                printf "\n" | pecl install zookeeper
-                docker-php-ext-enable zookeeper
+                echo "ERROR: zookeeper-${ZOOKEEPER_EXT_VERSION}.tgz 缺失，拒绝未验证的回退下载"
+                exit 1
             fi
         else
-            printf "\n" | pecl install zookeeper
-            docker-php-ext-enable zookeeper
+            echo "ERROR: ZOOKEEPER_EXT_VERSION 为空，无法可信校验 PECL 包"
+            exit 1
         fi
     fi
 fi
@@ -556,16 +563,17 @@ fi
 _declared_exts="${EXTENSIONS:-${PHP_EXTENSIONS:-,}}"
 _php_bin="${PHP_BIN:-/usr/local/bin/php}"
 _missing_exts=""
-for _ext in $(echo "${_declared_exts}" | tr ',' ' '); do
+while IFS= read -r _ext; do
+    [ -n "${_ext}" ] || continue
     case "$_ext" in
         # opcache 在 php -m 中的模块名为 Zend OPcache
         opcache) _module="Zend OPcache" ;;
-        *)       _module="$_ext" ;;
+        *)       _module="${_ext}" ;;
     esac
-    if ! "${_php_bin}" -m 2>/dev/null | grep -qix "$_module"; then
+    if ! "${_php_bin}" -m 2>/dev/null | grep -qix "${_module}"; then
         _missing_exts="${_missing_exts} ${_ext}"
     fi
-done
+done < <(printf '%s' "${_declared_exts}" | tr ',' '\n')
 
 if [ -n "${_missing_exts}" ]; then
     echo "============================================"

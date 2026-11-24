@@ -130,40 +130,77 @@ services:
             service: clickhouse-backup
 
     ################  PHP ########################
+    php86_apache:
+        extends:
+            file: stacks/php.yaml
+            service: php86_apache
+        security_opt:
+            - no-new-privileges:true
+        cap_drop:
+            - ALL
+
     php85_apache:
         extends:
             file: stacks/php.yaml
             service: php85_apache
+        security_opt:
+            - no-new-privileges:true
+        cap_drop:
+            - ALL
 
     php84_apache:
         extends:
             file: stacks/php.yaml
             service: php84_apache
+        security_opt:
+            - no-new-privileges:true
+        cap_drop:
+            - ALL
 
     php83_apache:
         extends:
             file: stacks/php.yaml
             service: php83_apache
+        security_opt:
+            - no-new-privileges:true
+        cap_drop:
+            - ALL
 
     php82_apache:
         extends:
             file: stacks/php.yaml
             service: php82_apache
+        security_opt:
+            - no-new-privileges:true
+        cap_drop:
+            - ALL
 
     php81_apache:
         extends:
             file: stacks/php.yaml
             service: php81_apache
+        security_opt:
+            - no-new-privileges:true
+        cap_drop:
+            - ALL
 
     php80_apache:
         extends:
             file: stacks/php.yaml
             service: php80_apache
+        security_opt:
+            - no-new-privileges:true
+        cap_drop:
+            - ALL
 
     php74_apache:
         extends:
             file: stacks/php.yaml
             service: php74_apache
+        security_opt:
+            - no-new-privileges:true
+        cap_drop:
+            - ALL
 
 networks:
     default:

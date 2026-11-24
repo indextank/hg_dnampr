@@ -826,7 +826,7 @@ fi
 while [[ $# -gt 0 ]]; do
     case $1 in
         # 服务名
-        php85|php84|php83|php82|php81|php80|php74|nginx|tengine|mysql|mysql_backup|redis|valkey|mongo|mongodb|postgres|postgresql|pgadmin|timescaledb|timescaledb_backup|pgvector|pgvector_backup|clickhouse|clickhouse_backup|elk|elasticsearch|kibana|logstash|sgr|spug|gitea|rap2-dolores|rap2-delos|rabbitmq|syncer|canal|canal-server|monitoring|prometheus|grafana|syncer-prometheus|syncer-grafana|all)
+        php86|php85|php84|php83|php82|php81|php80|php74|nginx|tengine|mysql|mysql_backup|redis|valkey|mongo|mongodb|postgres|postgresql|pgadmin|timescaledb|timescaledb_backup|pgvector|pgvector_backup|clickhouse|clickhouse_backup|elk|elasticsearch|kibana|logstash|sgr|spug|gitea|rap2-dolores|rap2-delos|rabbitmq|syncer|canal|canal-server|monitoring|prometheus|grafana|syncer-prometheus|syncer-grafana|all)
             SERVICES+=("$1")
             shift
             ;;
@@ -981,7 +981,10 @@ for service in "${SERVICES[@]}"; do
                 nginx)
                     echo -e "  • ${GREEN}nginx${NC}          - 标准的Nginx Web服务器"
                     ;;
-                php85)
+                php86|php86_apache)
+                    echo -e "  • ${GREEN}php86_apache${NC}   - PHP 8.6 + Apache 服务器"
+                    ;;
+                php85|php85_apache)
                     echo -e "  • ${GREEN}php85_apache${NC}   - PHP 8.5 + Apache 服务器"
                     ;;
                 php84)

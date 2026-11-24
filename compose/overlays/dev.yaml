@@ -210,12 +210,37 @@ services:
                 max-size: '10m' # 建议值：10-50MB
                 max-file: '3' # 建议值：3-5个文件
 
+    php86_apache:
+        extends:
+            file: stacks/php.yaml
+            service: php86_apache
+        environment:
+            <<: *php-perf-env
+        volumes:
+            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
+        deploy:
+            replicas: 1
+            resources:
+                limits:
+                    cpus: ${PHP_DEV_LIMITS_CPU:-0.25}
+                    memory: ${PHP_DEV_LIMITS_MEMORY:-256M}
+                reservations:
+                    cpus: ${PHP_DEV_RESERVATIONS_CPU:-0.1}
+                    memory: ${PHP_DEV_RESERVATIONS_MEMORY:-128M}
+        logging:
+            driver: 'json-file'
+            options:
+                max-size: '10m'
+                max-file: '3'
+
     php85_apache:
         extends:
             file: stacks/php.yaml
             service: php85_apache
         environment:
             <<: *php-perf-env
+        volumes:
+            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
         deploy:
             # 开发环境保持单副本，避免资源浪费
             # 建议值范围：1-2（本地多服务联调时可临时调整）
@@ -242,6 +267,8 @@ services:
             service: php84_apache
         environment:
             <<: *php-perf-env
+        volumes:
+            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
         deploy:
             # 开发环境保持单副本，避免资源浪费
             # 建议值范围：1-2（本地多服务联调时可临时调整）
@@ -268,6 +295,8 @@ services:
             service: php83_apache
         environment:
             <<: *php-perf-env
+        volumes:
+            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
         deploy:
             # 开发环境保持单副本，避免资源浪费
             # 建议值范围：1-2（本地多服务联调时可临时调整）
@@ -294,6 +323,8 @@ services:
             service: php82_apache
         environment:
             <<: *php-perf-env
+        volumes:
+            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
         deploy:
             # 开发环境保持单副本，避免资源浪费
             # 建议值范围：1-2（本地多服务联调时可临时调整）
@@ -324,6 +355,8 @@ services:
             service: php81_apache
         environment:
             <<: *php-perf-env
+        volumes:
+            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
         deploy:
             # 开发环境保持单副本，避免资源浪费
             # 建议值范围：1-2（本地多服务联调时可临时调整）
@@ -350,6 +383,8 @@ services:
             service: php80_apache
         environment:
             <<: *php-perf-env
+        volumes:
+            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
         deploy:
             # 开发环境保持单副本，避免资源浪避
             # 建议值范围：1-2（本地多服务联调时可临时调整）
@@ -376,6 +411,8 @@ services:
             service: php74_apache
         environment:
             <<: *php-perf-env
+        volumes:
+            - ${GLOBAL_WEB_PATH}:/var/www/html:rw,Z
         deploy:
             # 开发环境保持单副本，避免资源浪费
             # 建议值范围：1-2（本地多服务联调时可临时调整）

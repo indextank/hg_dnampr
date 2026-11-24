@@ -16,7 +16,11 @@
 .env.runtime
 # build/.env.compose 由 write_compose_env_file 合并生成（含 .env 的明文密钥），严禁入库
 build/.env.compose
+# build.sh 并发互斥锁（运行时生成）
+build/.build.lock
 # gost-client-forwarder.sh 的本机私有凭据
+# PHP 应用运行时私密变量（模板为 php-runtime.local.env.example）
+php-runtime.local.env
 *.local.env
 .cursor
 .cursorignore

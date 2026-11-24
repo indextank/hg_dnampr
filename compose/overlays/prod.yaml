@@ -423,10 +423,37 @@ services:
         max-size: "50m"
         max-file: "5"
 
+  php86_apache:
+    extends:
+      file: stacks/php.yaml
+      service: php86_apache
+    read_only: true
+    environment:
+      <<: *php-perf-env
+    deploy:
+      replicas: ${PHP_PROD_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      resources:
+        limits:
+          cpus: ${PHP_PROD_LIMITS_CPU:-1}
+          memory: ${PHP_PROD_LIMITS_MEMORY:-1G}
+        reservations:
+          cpus: ${PHP_PROD_RESERVATIONS_CPU:-0.5}
+          memory: ${PHP_PROD_RESERVATIONS_MEMORY:-512M}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
   php85_apache:
     extends:
       file: stacks/php.yaml
       service: php85_apache
+    read_only: true
     environment:
       <<: *php-perf-env
     deploy:
@@ -453,6 +480,7 @@ services:
     extends:
       file: stacks/php.yaml
       service: php84_apache
+    read_only: true
     environment:
       <<: *php-perf-env
     deploy:
@@ -479,6 +507,7 @@ services:
     extends:
       file: stacks/php.yaml
       service: php83_apache
+    read_only: true
     environment:
       <<: *php-perf-env
     deploy:
@@ -505,6 +534,7 @@ services:
     extends:
       file: stacks/php.yaml
       service: php82_apache
+    read_only: true
     environment:
       <<: *php-perf-env
     deploy:
@@ -531,6 +561,7 @@ services:
     extends:
       file: stacks/php.yaml
       service: php81_apache
+    read_only: true
     environment:
       <<: *php-perf-env
     deploy:
@@ -557,6 +588,7 @@ services:
     extends:
       file: stacks/php.yaml
       service: php80_apache
+    read_only: true
     environment:
       <<: *php-perf-env
     deploy:
@@ -583,6 +615,7 @@ services:
     extends:
       file: stacks/php.yaml
       service: php74_apache
+    read_only: true
     environment:
       <<: *php-perf-env
     deploy:

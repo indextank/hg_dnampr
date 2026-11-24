@@ -14,6 +14,234 @@
 #   "filename1:url1" "filename2:url2" ...
 #   URL 中包含 : (如 https://) 不影响解析，因为 cut -f2- 取第 2 字段到末尾
 
+# 仅允许经过 TLS 的上游地址。
+_require_https_url() {
+    case "$1" in
+        https://*) return 0 ;;
+        *)
+            echo "错误：拒绝非 HTTPS 下载地址: $1"
+            return 1
+            ;;
+    esac
+}
+
+# download_and_verify_sha256 — 下载并校验普通归档；无可信摘要时关闭失败。
+# 参数：$1 URL，$2 目标文件，$3 预期 SHA256。
+download_and_verify_sha256() {
+    local url="$1"
+    local filename="$2"
+    local expected_sha256="$3"
+    local actual_sha256=""
+    local tmp_file="${filename}.part"
+
+    _require_https_url "${url}" || return 1
+    if ! printf '%s' "${expected_sha256}" | grep -Eq '^[0-9a-fA-F]{64}$'; then
+        echo "错误：${filename} 缺少有效的显式 SHA256，拒绝下载"
+        return 1
+    fi
+    if ! command -v sha256sum >/dev/null 2>&1; then
+        echo "错误：sha256sum 不可用，无法校验 ${filename}"
+        return 1
+    fi
+
+    if [ -f "${filename}" ]; then
+        actual_sha256=$(sha256sum "${filename}" | cut -d' ' -f1)
+        if [ "${actual_sha256}" = "${expected_sha256}" ]; then
+            echo "${filename} 已存在且 SHA256 校验通过"
+            return 0
+        fi
+        echo "警告：${filename} 的 SHA256 不匹配，重新下载"
+        rm -f "${filename}"
+    fi
+
+    rm -f "${tmp_file}"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --proto '=https' --tlsv1.2 --http1.1 \
+            --retry 3 --retry-delay 5 -o "${tmp_file}" "${url}" || {
+            rm -f "${tmp_file}"
+            return 1
+        }
+    elif command -v wget >/dev/null 2>&1; then
+        wget --https-only --tries=3 --timeout=30 -O "${tmp_file}" "${url}" || {
+            rm -f "${tmp_file}"
+            return 1
+        }
+    else
+        echo "错误：未找到 curl 或 wget 命令"
+        return 1
+    fi
+
+    actual_sha256=$(sha256sum "${tmp_file}" | cut -d' ' -f1)
+    if [ "${actual_sha256}" != "${expected_sha256}" ]; then
+        echo "错误：${filename} 的 SHA256 校验失败"
+        rm -f "${tmp_file}"
+        return 1
+    fi
+    mv "${tmp_file}" "${filename}"
+    echo "${filename} 下载完成且 SHA256 校验通过"
+}
+
+# download_github_release_asset_verified — 使用 GitHub 发布资产元数据中的 SHA256。
+# 参数：$1 owner/repo，$2 tag，$3 资产名，$4 目标文件。
+download_github_release_asset_verified() {
+    local repository="$1"
+    local tag="$2"
+    local asset_name="$3"
+    local filename="$4"
+    local api_file="${filename}.github.json"
+    local metadata=""
+    local asset_url=""
+    local expected_sha256=""
+
+    if ! command -v php >/dev/null 2>&1; then
+        echo "错误：php 不可用，无法解析 GitHub 发布资产元数据"
+        return 1
+    fi
+    rm -f "${api_file}"
+    asset_url="https://api.github.com/repos/${repository}/releases/tags/${tag}"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-delay 5 \
+            -H 'Accept: application/vnd.github+json' -o "${api_file}" "${asset_url}" || return 1
+    elif command -v wget >/dev/null 2>&1; then
+        wget --https-only --tries=3 --timeout=30 -O "${api_file}" "${asset_url}" || return 1
+    else
+        echo "错误：未找到 curl 或 wget 命令"
+        return 1
+    fi
+
+    metadata=$(php -r '
+        $data = json_decode(file_get_contents($argv[1]), true);
+        if (!is_array($data) || ($data["tag_name"] ?? "") !== $argv[2]) exit(2);
+        foreach (($data["assets"] ?? []) as $asset) {
+            if (($asset["name"] ?? "") !== $argv[3]) continue;
+            $digest = $asset["digest"] ?? "";
+            $url = $asset["browser_download_url"] ?? "";
+            if (!preg_match("/^sha256:([0-9a-f]{64})$/i", $digest, $m) ||
+                strpos($url, "https://github.com/") !== 0) exit(3);
+            echo $url, "\n", $m[1], "\n";
+            exit(0);
+        }
+        exit(4);
+    ' "${api_file}" "${tag}" "${asset_name}") || {
+        echo "错误：GitHub 发布资产缺少可信 SHA256: ${repository} ${tag} ${asset_name}"
+        rm -f "${api_file}"
+        return 1
+    }
+    asset_url=$(printf '%s\n' "${metadata}" | sed -n '1p')
+    expected_sha256=$(printf '%s\n' "${metadata}" | sed -n '2p')
+    rm -f "${api_file}"
+    download_and_verify_sha256 "${asset_url}" "${filename}" "${expected_sha256}"
+}
+
+# download_pecl_package_verified — 用 PECL REST 元数据和 package.xml 校验归档。
+# PECL REST 不发布 SHA256；这里同时验证包名、版本、大小、HTTPS 下载地址和
+# 归档内 package.xml 身份。任一信息无法验证时关闭失败。
+# 参数：$1 包名，$2 版本，$3 目标文件。
+download_pecl_package_verified() {
+    local package="$1"
+    local version="$2"
+    local filename="$3"
+    local rest_file="${filename}.rest.xml"
+    local tmp_file="${filename}.part"
+    local metadata=""
+    local download_url=""
+    local expected_size=""
+    local actual_size=""
+
+    if [ -z "${package}" ] || [ -z "${version}" ]; then
+        echo "错误：PECL 包名和版本不能为空"
+        return 1
+    fi
+    if ! command -v php >/dev/null 2>&1; then
+        echo "错误：php 不可用，无法验证 PECL REST/package.xml"
+        return 1
+    fi
+
+    rm -f "${rest_file}" "${tmp_file}"
+    download_url="https://pecl.php.net/rest/r/${package}/${version}.xml"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-delay 5 \
+            -o "${rest_file}" "${download_url}" || return 1
+    elif command -v wget >/dev/null 2>&1; then
+        wget --https-only --tries=3 --timeout=30 -O "${rest_file}" "${download_url}" || return 1
+    else
+        echo "错误：未找到 curl 或 wget 命令"
+        return 1
+    fi
+
+    metadata=$(php -r '
+        $xml = @simplexml_load_file($argv[1]);
+        if ($xml === false) exit(2);
+        $xml->registerXPathNamespace("p", "http://pear.php.net/dtd/rest.release");
+        $get = static function ($xml, $name) {
+            $nodes = $xml->xpath("//p:" . $name);
+            return isset($nodes[0]) ? trim((string) $nodes[0]) : "";
+        };
+        $package = $get($xml, "p");
+        $version = $get($xml, "v");
+        $size = $get($xml, "f");
+        $url = $get($xml, "g");
+        if ($package !== $argv[2] || $version !== $argv[3] ||
+            !ctype_digit($size) || strpos($url, "https://pecl.php.net/get/") !== 0) exit(3);
+        echo $size, "\n", $url, "\n";
+    ' "${rest_file}" "${package}" "${version}") || {
+        echo "错误：PECL REST 元数据验证失败: ${package}-${version}"
+        rm -f "${rest_file}"
+        return 1
+    }
+    expected_size=$(printf '%s\n' "${metadata}" | sed -n '1p')
+    download_url=$(printf '%s\n' "${metadata}" | sed -n '2p')
+    case "${download_url}" in
+        *.tgz) ;;
+        *) download_url="${download_url}.tgz" ;;
+    esac
+    _require_https_url "${download_url}" || return 1
+
+    if [ -f "${filename}" ]; then
+        actual_size=$(wc -c < "${filename}" | tr -d ' ')
+        if [ "${actual_size}" != "${expected_size}" ]; then
+            echo "警告：${filename} 大小与 PECL REST 不符，重新下载"
+            rm -f "${filename}"
+        fi
+    fi
+    if [ ! -f "${filename}" ]; then
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL --proto '=https' --tlsv1.2 --http1.1 \
+                --retry 3 --retry-delay 5 -o "${tmp_file}" "${download_url}" || {
+                rm -f "${rest_file}" "${tmp_file}"
+                return 1
+            }
+        else
+            wget --https-only --tries=3 --timeout=30 -O "${tmp_file}" "${download_url}" || {
+                rm -f "${rest_file}" "${tmp_file}"
+                return 1
+            }
+        fi
+        actual_size=$(wc -c < "${tmp_file}" | tr -d ' ')
+        if [ "${actual_size}" != "${expected_size}" ]; then
+            echo "错误：${filename} 大小与 PECL REST 不符"
+            rm -f "${rest_file}" "${tmp_file}"
+            return 1
+        fi
+        mv "${tmp_file}" "${filename}"
+    fi
+
+    if ! tar -xOf "${filename}" package.xml 2>/dev/null | php -r '
+        $xml = @simplexml_load_string(stream_get_contents(STDIN));
+        if ($xml === false) exit(2);
+        $ns = $xml->getNamespaces(true);
+        $p = isset($ns[""]) ? $xml->children($ns[""]) : $xml;
+        if (trim((string) $p->name) !== $argv[1] ||
+            trim((string) $p->version->release) !== $argv[2]) exit(3);
+    ' "${package}" "${version}"; then
+        echo "错误：${filename} 的 package.xml 身份校验失败"
+        rm -f "${filename}" "${rest_file}"
+        return 1
+    fi
+    rm -f "${rest_file}"
+    echo "${filename} 已通过 PECL REST/package.xml 校验"
+}
+
 # ==========================================
 # _download_file_complete — 判断下载产物是否完整
 # ==========================================
@@ -53,11 +281,12 @@ download_if_missing() {
     local url="$1"
     local filename="$2"
 
+    _require_https_url "${url}" || return 1
     if [ ! -f "${filename}" ]; then
         echo "下载 ${filename}..."
         if command -v curl >/dev/null 2>&1; then
             # --http1.1：规避 CDN 在 HTTP/2 下未干净关闭流导致的 curl exit 18
-            if ! curl -fsSL --http1.1 --retry 3 --retry-delay 5 -o "${filename}" "${url}"; then
+            if ! curl -fsSL --proto '=https' --tlsv1.2 --http1.1 --retry 3 --retry-delay 5 -o "${filename}" "${url}"; then
                 # curl 报错但文件可能已完整（exit 18），校验后接受
                 if _download_file_complete "${filename}"; then
                     echo "curl 返回非 0，但文件完整，视为下载成功: ${filename}"
@@ -68,7 +297,7 @@ download_if_missing() {
                 fi
             fi
         elif command -v wget >/dev/null 2>&1; then
-            wget --tries=3 --timeout=30 -O "${filename}" "${url}" || {
+            wget --https-only --tries=3 --timeout=30 -O "${filename}" "${url}" || {
                 echo "下载 ${filename} 失败"
                 return 1
             }
@@ -110,10 +339,13 @@ download_if_missing_fallback() {
     local url
     for url in "$@"; do
         [ -z "$url" ] && continue
+        if ! _require_https_url "${url}"; then
+            continue
+        fi
         echo "尝试下载 ${filename}: ${url}"
         if command -v curl >/dev/null 2>&1; then
             # --http1.1：规避 CDN 在 HTTP/2 下未干净关闭流导致的 curl exit 18
-            if curl -fsSL --http1.1 --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 5 -o "${filename}" "${url}"; then
+            if curl -fsSL --proto '=https' --tlsv1.2 --http1.1 --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 5 -o "${filename}" "${url}"; then
                 # curl 成功也要校验：部分镜像会对不存在的路径返回 200 + 错误页
                 if _download_file_complete "${filename}"; then
                     echo "${filename} 下载完成"
@@ -129,7 +361,7 @@ download_if_missing_fallback() {
                 return 0
             fi
         elif command -v wget >/dev/null 2>&1; then
-            if wget --tries=3 --timeout=30 -O "${filename}" "${url}"; then
+            if wget --https-only --tries=3 --timeout=30 -O "${filename}" "${url}"; then
                 echo "${filename} 下载完成"
                 return 0
             fi

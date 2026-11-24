@@ -2,7 +2,7 @@
 
 ![Docker / Podman](https://img.shields.io/badge/Runtime-Docker%20%2F%20Podman-2496ED.svg)
 ![WSL2](https://img.shields.io/badge/Host-WSL2%20%C2%B7%20Linux-0078D4.svg)
-![PHP](https://img.shields.io/badge/PHP-7.4--8.5-777BB4.svg)
+![PHP](https://img.shields.io/badge/PHP-7.4--8.6-777BB4.svg)
 ![MySQL](https://img.shields.io/badge/MySQL-8.0%20%2F%208.4%20%2F%209.7-4479A1.svg)
 ![ELK](https://img.shields.io/badge/Observability-ELK%20%2B%20Prometheus-FEC8D2?logo=prometheus&logoColor=black)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
@@ -40,7 +40,10 @@
 
 ### 🌐 Web / PHP 开发环境
 
-- **多版本 PHP 并存**：`php74` … `php85` 各自独立容器（镜像 `hg_dnmpr_phpXX_apache`），宿主机端口默认 `8074`–`8085`，方便同一台机器并行测试不同 PHP 版本。
+- **多版本 PHP 并存**：`php74` … `php86` 各自独立容器（镜像 `hg_dnmpr_phpXX_apache`），宿主机端口默认 `8074`–`8086`，方便同一台机器并行测试不同 PHP 版本。
+- **最小权限运行**：PHP/Apache 全程以 `www-data` 运行，默认 `no-new-privileges`、`cap_drop: ALL`；生产 overlay 同时启用只读根文件系统与只读代码挂载。
+- **密钥隔离**：PHP 容器不加载根 `.env` 或数据库管理员环境文件。应用账号复制 `php-runtime.local.env.example` 为 `php-runtime.local.env` 后维护，该文件已被 Git 忽略。
+- **可复现构建**：全版本共用 `build/php/common/Dockerfile`，PHP/OpenSSL 本地源码由 `build/php/checksums.sha256` 固定校验；远程扩展下载强制 TLS 和归档身份/摘要校验。
 - **双 Web 入口**：`nginx` / `tengine` 作为反向代理与静态与 PHP 入口，站点配置在 `vhost/`。
 - **环境自适应**：`ENVIRONMENT` + `compose/overlays/{dev,prod}.yaml` 决定调试端口、资源限制；开发态为 Hyperf 等框架额外映射调试端口（默认 `9901`–`9903`），生产态不暴露。
 
@@ -103,7 +106,7 @@ Tiny Tiny RSS + `mercury` 正文解析 + `opencc` 简繁转换 + `rsshub` 生成
 | 服务                | 宿主端口（默认）         | 版本开关                                   |
 | ------------------- | ------------------------ | ------------------------------------------ |
 | `nginx` / `tengine` | HTTP `80`、HTTPS `443`   | —                                          |
-| `php74` … `php85`   | `8074`–`8085`            | `env/php.env`                              |
+| `php74` … `php86`   | `8074`–`8086`            | `env/php.env`                              |
 | `mysql`             | `3306`                   | `MYSQL_BUILD_VERSION`（`8.0`/`8.4`/`9.7`） |
 | `postgres`          | `5432`                   | `PG_MAJOR`                                 |
 | `pgadmin`           | `65050`                  | —                                          |
@@ -160,7 +163,7 @@ hg_dnmpr/
 ```mermaid
 flowchart TD
     subgraph MAIN["主栈工程 hg_dnmpr（compose/main.yaml + overlay）"]
-        NG[nginx / tengine] --> PHP[php74…php85]
+        NG[nginx / tengine] --> PHP[php74…php86]
         PHP --> MY[(mysql)]
         PHP --> RD[(redis / valkey)]
         DBS[(postgres · timescaledb · pgvector · mongo · clickhouse)]

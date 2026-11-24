@@ -230,6 +230,7 @@ setup_docker_aliases() {
 
     # 定义所有别名（使用 $CR 变量替代硬编码 docker）
     local aliases=(
+        "alias dphp86='$CR exec -it php86_apache /bin/bash'"
         "alias dphp74='$CR exec -it php74_apache /bin/bash'"
         "alias dphp82='$CR exec -it php82_apache /bin/bash'"
         "alias dphp84='$CR exec -it php84_apache /bin/bash'"
@@ -849,7 +850,7 @@ derive_php_ini_overlay_paths() {
         error "缺少 ${_common_opcache_abs}（全版本 PHP 必须加载 opcache.ini）"
     fi
 
-    for _ver in 7.4 8.0 8.1 8.2 8.3 8.4 8.5; do
+    for _ver in 7.4 8.0 8.1 8.2 8.3 8.4 8.5 8.6; do
         _tag="${_ver//./}"
         _var="PHP${_tag}_HARDENING_INI_FILE"
         _ver_abs="${_php_root}/${_ver}/hardening.ini"
@@ -999,7 +1000,7 @@ ${YELLOW}使用方法:${NC}
     $0 [服务名...] [选项]
 
 ${YELLOW}服务名:${NC}
-    php84, php83, php82, php81, php80, php74  - PHP服务
+    php86, php85, php84, php83, php82, php81, php80, php74  - PHP服务
     nginx, tengine                                    - Web服务器 ⚠️ 二选一
     mysql, mysql                                   - MySQL数据库 ⚠️ 二选一
     redis, valkey                                     - 缓存服务
@@ -1038,7 +1039,7 @@ ${YELLOW}选项:${NC}
 ${YELLOW}示例:${NC}
     $0                                              # 显示帮助信息
     $0 help                                         # 显示帮助信息
-    $0 php84                                        # 按 base.env 当前环境构建PHP84
+    $0 php86                                        # 按 base.env 当前环境构建PHP86
     $0 php84 --no-cache                             # 无缓存构建PHP84
     $0 php84 php82 mysql valkey                    # 按 base.env 当前环境构建多个服务
     $0 php84 php82 mysql valkey --force-recreate    # 先构建，再按新镜像重建容器
@@ -1112,7 +1113,7 @@ ${YELLOW}命令:${NC}
     --help, -h          显示此帮助信息
 
 ${YELLOW}服务名:${NC}
-    php84, php83, php82, php81, php80, php74  - PHP服务
+    php86, php85, php84, php83, php82, php81, php80, php74  - PHP服务
     nginx, tengine                                    - Web服务器 ⚠️ 二选一
     mysql, mysql                                   - MySQL数据库 ⚠️ 二选一
     redis, valkey                                     - 缓存服务
@@ -1142,7 +1143,7 @@ ${YELLOW}示例:${NC}
     $0                                              # 显示帮助信息
     $0 help                                         # 显示帮助信息
     $0 up                                           # 按 base.env 当前环境启动所有服务
-    $0 up php84 mysql                             # 启动指定服务
+    $0 up php86 mysql                             # 启动指定服务
     $0 down                                         # 停止所有服务
     $0 restart nginx                                # 重启nginx服务
     $0 ps                                           # 查看所有服务状态
