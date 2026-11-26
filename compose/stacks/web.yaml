@@ -80,15 +80,6 @@ services:
                 reservations:
                     cpus: ${NGINX_RESERVATIONS_CPU:-0.25} # 默认预留0.25 CPU核心
                     memory: ${NGINX_RESERVATIONS_MEMORY:-128M} # 默认预留128MB内存
-        depends_on:
-            php74_apache:
-                condition: service_healthy
-            # php82_apache:
-            #   condition: service_healthy
-            php84_apache:
-                condition: service_healthy
-        #     php85_apache:
-        #         condition: service_healthy
         restart: unless-stopped # 或 always
         # 仅前端网络：不可直连 backend 上的 DB（防公网入口横向移动）
         # 仅前端网络（同 nginx）
@@ -138,14 +129,5 @@ services:
                     cpus: ${TENGINE_RESERVATIONS_CPU:-0.25}
                     memory: ${TENGINE_RESERVATIONS_MEMORY:-128M}
         restart: unless-stopped # 或 always
-        depends_on:
-            php74_apache:
-                condition: service_healthy
-            # php82_apache:
-            #   condition: service_healthy
-            php84_apache:
-                condition: service_healthy
-            # php85_apache:
-            #   condition: service_healthy
         networks:
             - default
